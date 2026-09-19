@@ -9,10 +9,38 @@ import {
   runBrowserbaseVerification,
 } from "./browserbaseWork.js";
 import { presentLiveViewInMeet, resolveMeetUrl } from "./meetPresent.js";
+import {
+  getSession,
+  listSessions,
+  startMeetTranscription,
+  stopSession,
+  subscribe,
+} from "./meetTranscribe.js";
 
 const app = express();
-const origin = envOptional("DASHBOARD_ORIGIN") ?? "http://localhost:3000";
-app.use(cors({ origin: [origin, "http://127.0.0.1:3000"] }));
+const configuredOrigin = envOptional("DASHBOARD_ORIGIN") ?? "http://localhost:3000";
+
+// Local dev agent: allow the configured dashboard origin plus any loopback port,
+// so the UW tab works whether Next picked 3000, 3001, 3002, ...
+// Non-loopback origins are still rejected.
+const LOOPBACK_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):\d+$/;
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) {
+        // curl / server-to-server (no Origin header)
+        callback(null, true);
+        return;
+      }
+      if (origin === configuredOrigin || LOOPBACK_ORIGIN.test(origin)) {
+        callback(null, true);
+        return;
+      }
+      // Reject without throwing: omit CORS headers instead of raising a 500.
+      callback(null, false);
+    },
+  }),
+);
 app.use(express.json());
 
 app.get("/health", (_req, res) => {
@@ -104,6 +132,55 @@ app.post("/api/federato/present-meet", async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
+});
+
+// ── Send a goose: join a Meet and transcribe it live ──────────────────────
+const MEET_RE = /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\?.*)?$/i;
+
+app.post("/api/meet/join", (req, res) => {
+  const meetUrl = typeof req.body?.meetUrl === "string" ? req.body.meetUrl.trim() : "";
+  if (!MEET_RE.test(meetUrl)) {
+    res.status(400).json({
+      error: "Expected a Google Meet link like https://meet.google.com/abc-defg-hij",
+    });
+    return;
+  }
+  const { sessionId } = startMeetTranscription(meetUrl);
+  res.json({ sessionId });
+});
+
+app.get("/api/meet/sessions", (_req, res) => {
+  res.json({ sessions: listSessions() });
+});
+
+app.get("/api/meet/sessions/:id", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) {
+    res.status(404).json({ error: "No such session" });
+    return;
+  }
+  res.json({ session });
+});
+
+app.get("/api/meet/sessions/:id/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+  const ok = subscribe(req.params.id, res);
+  if (!ok) {
+    res.write(`event: status\ndata: ${JSON.stringify({ status: "error", error: "No such session" })}\n\n`);
+    res.end();
+  }
+});
+
+app.post("/api/meet/sessions/:id/leave", async (req, res) => {
+  const stopped = await stopSession(req.params.id);
+  if (!stopped) {
+    res.status(404).json({ error: "No such session" });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 const port = Number(process.env.PORT ?? 8787);

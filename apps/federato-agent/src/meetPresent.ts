@@ -6,6 +6,7 @@
  * First run: sign into Google once in the headed window; the profile is reused.
  */
 
+import fs from "node:fs";
 import path from "node:path";
 import type { BrowserContext, Page } from "playwright-core";
 import { chromium } from "playwright-core";
@@ -32,7 +33,23 @@ export function screenshareProfileDir(): string {
   return path.join(CACHE_DIR, "screenshare-profile");
 }
 
-export async function launchMeetChrome() {
+/**
+ * Chrome keeps a SingletonLock in the profile dir; a crashed or killed run
+ * leaves it behind, and the next launch just hands off to the "existing"
+ * (dead) session and exits. Clear the stale locks so we can relaunch.
+ */
+function clearSingletonLocks(): void {
+  const dir = screenshareProfileDir();
+  for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
+    try {
+      fs.rmSync(path.join(dir, name), { force: true });
+    } catch {
+      /* nothing to clear */
+    }
+  }
+}
+
+async function launchOnce() {
   return chromium.launchPersistentContext(screenshareProfileDir(), {
     headless: false,
     executablePath: chromePath(),
@@ -48,6 +65,20 @@ export async function launchMeetChrome() {
     ],
     viewport: { width: 1440, height: 900 },
   });
+}
+
+export async function launchMeetChrome() {
+  try {
+    return await launchOnce();
+  } catch (e) {
+    const msg = (e as Error).message;
+    // Stale profile lock from a prior crashed run — clear it and retry once.
+    if (/existing browser session|SingletonLock|already in use/i.test(msg)) {
+      clearSingletonLocks();
+      return await launchOnce();
+    }
+    throw e;
+  }
 }
 
 /** Open the Playwright Chrome profile so you can sign into Google once. */
@@ -178,7 +209,7 @@ async function dumpMeetDebug(page: Page, notes: string[]): Promise<void> {
   }
 }
 
-async function joinMeet(page: Page, notes: string[]): Promise<boolean> {
+export async function joinMeet(page: Page, notes: string[]): Promise<boolean> {
   await page.waitForLoadState("domcontentloaded");
   await waitForGoogleSession(page, notes);
   await page.waitForTimeout(2500);

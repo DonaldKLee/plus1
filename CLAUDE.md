@@ -26,17 +26,29 @@ fixtures/              transcript-demo.json
 - Camera/goose is teammate-owned; screenshare = Present Browserbase live-view tab.
 
 
-## This session
+## Send a goose (live transcription)
 
-Built `apps/dashboard` to the impeccable craft floor: the operator's live console
-(mission-control terminal world). Driven by `fixtures/transcript-demo.json`, it replays a full
-meeting end-to-end — gate classifications, the Mind pipeline, artifacts, honks, barge-in.
-Design decisions live in `apps/dashboard/DESIGN.md`.
+The core product flow, end to end:
 
-## Running the dashboard
+1. Dashboard `/app` — paste a Meet link, "Send the goose" → `POST /api/meet/join`.
+2. `apps/federato-agent/src/meetTranscribe.ts` — launches a local Playwright Chrome
+   (`launchMeetChrome`), joins the Meet (`joinMeet` from `meetPresent.ts`), and taps every
+   remote audio stream via Web Audio. ~5s PCM chunks → Gemini `generateContent` → transcript lines.
+3. Lines stream to the dashboard over SSE (`GET /api/meet/sessions/:id/stream`) and render live
+   in `components/console/LiveTranscript.tsx` at `/app/meetings/[id]`.
+
+`GEMINI_API_KEY` in `.env`. First run needs a one-time Google sign-in in the headed Chrome
+profile (`npm run google-login` in `apps/federato-agent`, or just sign in when the window opens).
+
+All prior fixture/dummy data (personas, integrations, replay demo) has been removed; the dashboard
+is Home / Meetings / Underwrite only.
+
+## Running it
 
 ```bash
-cd apps/dashboard
-npm install
-npm run dev      # http://localhost:3000
+# terminal 1 — the agent that joins + transcribes
+cd apps/federato-agent && npm install && npm run dev   # :8787
+
+# terminal 2 — the dashboard
+cd apps/dashboard && npm install && npm run dev         # http://localhost:3000
 ```

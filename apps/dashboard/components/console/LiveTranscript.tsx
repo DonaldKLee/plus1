@@ -2,13 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Button, Panel, PanelHead } from "@/components/ui";
+import { Button, Input, Panel, PanelHead } from "@/components/ui";
 import { Arrow } from "@/components/icons";
 import {
   STATUS_LABEL,
   fmtClock,
+  filler,
+  honk,
+  interrupt,
   leaveSession,
+  speak,
   streamUrl,
+  type AvatarState,
   type DecisionRecord,
   type SessionStatus,
   type TranscriptLine,
@@ -38,6 +43,9 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
   const [notes, setNotes] = useState<string[]>([]);
   const [lines, setLines] = useState<TranscriptLine[]>([]);
   const [decisions, setDecisions] = useState<DecisionRecord[]>([]);
+  const [avatar, setAvatar] = useState<AvatarState | null>(null);
+  const [say, setSay] = useState("");
+  const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -69,6 +77,9 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
         return next;
       });
     });
+    es.addEventListener("avatar", (e) => {
+      setAvatar(JSON.parse((e as MessageEvent).data) as AvatarState);
+    });
     es.addEventListener("note", (e) => {
       const d = JSON.parse((e as MessageEvent).data) as { msg: string };
       setNotes((prev) => [...prev.slice(-20), d.msg]);
@@ -88,6 +99,22 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
   const live = status === "listening";
   const working = status === "joining" || status === "waiting-admit";
   const acted = decisions.filter((d) => d.outcome && d.outcome !== "held" && d.outcome !== "below threshold");
+  const avatarReady = avatar?.session === "ready" || avatar?.session === "speaking";
+
+  async function submitSay(e: React.FormEvent) {
+    e.preventDefault();
+    const text = say.trim();
+    if (!text || sending) return;
+    setSending(true);
+    try {
+      await speak(sessionId, text);
+      setSay("");
+    } catch (err) {
+      setNotes((prev) => [...prev.slice(-20), `speak failed: ${(err as Error).message}`]);
+    } finally {
+      setSending(false);
+    }
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col p-3 lg:p-4">
@@ -162,7 +189,7 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
                   className="text-[13.5px] leading-relaxed"
                   style={{ color: l.agent ? "var(--brand)" : "var(--fg)" }}
                 >
-                  {l.agent && <span className="mr-1.5 font-medium">goose:</span>}
+                  {l.agent && <span className="mr-1.5 font-medium">{l.speaker ?? "goose"}:</span>}
                   {l.text}
                   {l.partial && (
                     <span
@@ -176,6 +203,37 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
             ))}
             <div ref={endRef} />
           </div>
+
+          {/* Operator controls: make the goose speak by hand, or cut it off. The brain does the rest. */}
+          {(live || working) && (
+            <form onSubmit={submitSay} className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2.5">
+              <span
+                className={avatar?.speaking ? "dot dot-pulse" : "dot"}
+                style={{ color: avatarReady ? "var(--live)" : "var(--fg-subtle)" }}
+                title={avatar ? `avatar ${avatar.session} · media ${avatar.media}` : "avatar not started"}
+              />
+              <Input
+                value={say}
+                onChange={(e) => setSay(e.target.value)}
+                disabled={!avatarReady || sending}
+                placeholder={avatarReady ? "make the goose say…" : "avatar warming up…"}
+                className="min-w-0 flex-1 disabled:opacity-50"
+                autoComplete="off"
+              />
+              <Button type="submit" variant="primary" size="sm" disabled={!avatarReady || sending || !say.trim()}>
+                Say it
+              </Button>
+              <Button type="button" variant="secondary" size="sm" disabled={!avatarReady} onClick={() => void filler(sessionId, "ack")}>
+                “on it”
+              </Button>
+              <Button type="button" variant="secondary" size="sm" disabled={!avatarReady} onClick={() => void interrupt(sessionId)}>
+                Interrupt
+              </Button>
+              <Button type="button" variant="secondary" size="sm" disabled={!avatarReady} onClick={() => void honk(sessionId)}>
+                Honk
+              </Button>
+            </form>
+          )}
         </Panel>
 
         {/* Decisions */}

@@ -10,8 +10,14 @@ import {
 } from "./browserbaseWork.js";
 import { presentLiveViewInMeet, resolveMeetUrl } from "./meetPresent.js";
 import {
+  avatarStatus,
+  emoteSession,
+  fillerInSession,
   getSession,
+  honkSession,
+  interruptSession,
   listSessions,
+  speakInSession,
   startMeetTranscription,
   stopSession,
   subscribe,
@@ -172,6 +178,32 @@ app.get("/api/meet/sessions/:id/stream", (req, res) => {
     res.write(`event: status\ndata: ${JSON.stringify({ status: "error", error: "No such session" })}\n\n`);
     res.end();
   }
+});
+
+// ── The goose speaks: control-plane → runner commands (HLD §10), per session ──
+function gooseRoute(handler: (id: string, body: any) => unknown | Promise<unknown>) {
+  return async (req: express.Request, res: express.Response) => {
+    try {
+      const out = await handler(String(req.params.id), req.body ?? {});
+      res.json(out ?? { ok: true });
+    } catch (e) {
+      const msg = (e as Error).message;
+      res.status(/No such session/.test(msg) ? 404 : /no avatar|not ready/i.test(msg) ? 409 : 500).json({ error: msg });
+    }
+  };
+}
+app.post("/api/meet/sessions/:id/speak", gooseRoute((id, b) => {
+  if (typeof b.text !== "string" || !b.text.trim()) throw new Error("text required");
+  return speakInSession(id, b.text);
+}));
+app.post("/api/meet/sessions/:id/filler", gooseRoute((id, b) => fillerInSession(id, b.kind ?? "ack") ?? { error: "no fillers cached" }));
+app.post("/api/meet/sessions/:id/interrupt", gooseRoute((id) => { interruptSession(id); }));
+app.post("/api/meet/sessions/:id/honk", gooseRoute((id) => honkSession(id)));
+app.post("/api/meet/sessions/:id/emote", gooseRoute((id, b) => emoteSession(id, b.emote ?? "idle")));
+app.get("/api/meet/sessions/:id/avatar", (req, res) => {
+  const st = avatarStatus(req.params.id);
+  if (!st) { res.status(404).json({ error: "No such session" }); return; }
+  res.json(st);
 });
 
 app.post("/api/meet/sessions/:id/leave", async (req, res) => {

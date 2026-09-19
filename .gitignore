@@ -9,3 +9,7 @@ dist/
 apps/federato-agent/cache/
 *.log
 .turbo/
+.env.*
+!.env.example
+*.tsbuildinfo
+apps/runner-profile/

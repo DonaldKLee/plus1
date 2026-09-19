@@ -13,7 +13,9 @@
     "federato:cache": "npm run cache-refresh -w @plus1/federato-agent",
     "federato:screenshare": "npm run screenshare -w @plus1/federato-agent",
     "federato:google-login": "npm run google-login -w @plus1/federato-agent",
-    "test:brain": "npm run test -w @plus1/brain"
+    "test:brain": "npm run test -w @plus1/brain",
+    "avatar:preview": "npm run preview -w @plus1/liveavatar",
+    "test:avatar": "npm test -w @plus1/liveavatar && npm test -w @plus1/voice"
   },
   "devDependencies": {
     "concurrently": "^10.0.5"

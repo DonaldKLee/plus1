@@ -31,11 +31,9 @@ npm install                   # from repo root
 
 Dashboard talks to the agent at `http://localhost:8787` (`apps/dashboard/.env.local.example`).
 
-For the goose's **spoken (ElevenLabs) voice to reach the meeting**, install the BlackHole virtual mic once, then set it as your input in **System Settings → Sound → Input** (and as the mic in the goose's Meet window):
-
-```bash
-brew install blackhole-2ch
-```
+The goose's face and voice come from `packages/liveavatar` (HeyGen LiveAvatar on the Meet tab's
+fake camera/mic) and `packages/voice` (ElevenLabs → PCM). No virtual audio devices needed: set
+`LIVEAVATAR_API_KEY`, `LIVEAVATAR_AVATAR_ID`, `ELEVENLABS_API_KEY` in `.env` (see `.env.example`).
 
 ### `.env` keys
 

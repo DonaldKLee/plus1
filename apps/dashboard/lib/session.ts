@@ -18,6 +18,14 @@ export interface TranscriptLine {
   text: string;
   partial?: boolean; // still being spoken
   agent?: boolean; // the goose's own voice
+  speaker?: string; // the goose's display name on its lines
+}
+
+/** LiveAvatar state as reported by the agent over SSE (`avatar` events). */
+export interface AvatarState {
+  session: string; // idle | starting | ready | speaking | stopping | stopped
+  media: string; // idle | connecting | live | reconnecting | failed
+  speaking: boolean;
 }
 
 export type ActionKind = "speak" | "chat" | "tool" | "none";
@@ -73,6 +81,32 @@ export async function fetchSessions(): Promise<SessionSummary[]> {
 
 export async function leaveSession(id: string): Promise<void> {
   await fetch(`${AGENT_URL}/api/meet/sessions/${id}/leave`, { method: "POST" });
+}
+
+async function post(path: string, body?: unknown): Promise<any> {
+  const res = await fetch(`${AGENT_URL}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error ?? `Agent returned ${res.status}`);
+  return json;
+}
+
+/** Make the goose say something (text → ElevenLabs → LiveAvatar → Meet). */
+export function speak(id: string, text: string): Promise<{ id: string }> {
+  return post(`/api/meet/sessions/${id}/speak`, { text });
+}
+/** Instant cached filler ("on it.", "one sec."). */
+export function filler(id: string, kind: "ack" | "checking" | "wait" | "unsure" = "ack"): Promise<{ phrase?: string }> {
+  return post(`/api/meet/sessions/${id}/filler`, { kind });
+}
+export function interrupt(id: string): Promise<void> {
+  return post(`/api/meet/sessions/${id}/interrupt`);
+}
+export function honk(id: string): Promise<void> {
+  return post(`/api/meet/sessions/${id}/honk`);
 }
 
 export function streamUrl(id: string): string {

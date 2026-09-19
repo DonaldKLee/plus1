@@ -6,6 +6,7 @@
  * First run: sign into Google once in the headed window; the profile is reused.
  */
 
+import fs from "node:fs";
 import path from "node:path";
 import type { BrowserContext, Page } from "playwright-core";
 import { chromium } from "playwright-core";
@@ -32,7 +33,23 @@ export function screenshareProfileDir(): string {
   return path.join(CACHE_DIR, "screenshare-profile");
 }
 
-export async function launchMeetChrome() {
+/**
+ * Chrome keeps a SingletonLock in the profile dir; a crashed or killed run
+ * leaves it behind, and the next launch just hands off to the "existing"
+ * (dead) session and exits. Clear the stale locks so we can relaunch.
+ */
+function clearSingletonLocks(): void {
+  const dir = screenshareProfileDir();
+  for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
+    try {
+      fs.rmSync(path.join(dir, name), { force: true });
+    } catch {
+      /* nothing to clear */
+    }
+  }
+}
+
+async function launchOnce() {
   return chromium.launchPersistentContext(screenshareProfileDir(), {
     headless: false,
     executablePath: chromePath(),
@@ -48,6 +65,20 @@ export async function launchMeetChrome() {
     ],
     viewport: { width: 1440, height: 900 },
   });
+}
+
+export async function launchMeetChrome() {
+  try {
+    return await launchOnce();
+  } catch (e) {
+    const msg = (e as Error).message;
+    // Stale profile lock from a prior crashed run — clear it and retry once.
+    if (/existing browser session|SingletonLock|already in use/i.test(msg)) {
+      clearSingletonLocks();
+      return await launchOnce();
+    }
+    throw e;
+  }
 }
 
 /** Open the Playwright Chrome profile so you can sign into Google once. */
@@ -178,7 +209,7 @@ async function dumpMeetDebug(page: Page, notes: string[]): Promise<void> {
   }
 }
 
-async function joinMeet(page: Page, notes: string[]): Promise<boolean> {
+export async function joinMeet(page: Page, notes: string[]): Promise<boolean> {
   await page.waitForLoadState("domcontentloaded");
   await waitForGoogleSession(page, notes);
   await page.waitForTimeout(2500);
@@ -192,53 +223,62 @@ async function joinMeet(page: Page, notes: string[]): Promise<boolean> {
     notes.push("Signed-in Meet prejoin (no guest name field).");
   }
 
-  await clickNamed(page, /turn off (microphone|mic)/i, 1200);
-  await clickNamed(page, /turn off camera/i, 1200);
+  // Mute before joining — try the buttons, then fall back to Meet's keyboard
+  // shortcuts (⌘/Ctrl+D mic, ⌘/Ctrl+E camera) so nobody has to click.
+  const mods = process.platform === "darwin" ? "Meta" : "Control";
+  if (!(await clickNamed(page, /turn off (microphone|mic)/i, 1200))) {
+    await page.keyboard.press(`${mods}+d`).catch(() => {});
+  }
+  if (!(await clickNamed(page, /turn off camera/i, 1200))) {
+    await page.keyboard.press(`${mods}+e`).catch(() => {});
+  }
   await dismissNoise(page);
 
-  const joinedAlready = await page
-    .getByRole("button", { name: /leave call|end call/i })
-    .first()
-    .isVisible()
-    .catch(() => false);
-  if (joinedAlready) {
+  const inMeeting = () =>
+    page
+      .getByRole("button", { name: /leave call|end call|present now|share screen/i })
+      .first()
+      .isVisible()
+      .catch(() => false);
+
+  if (await inMeeting()) {
     notes.push("Already in the meeting.");
     return true;
   }
 
-  const clicked = await clickJoinish(page);
-  if (!clicked) {
-    notes.push("Could not find a Join control.");
-    await dumpMeetDebug(page, notes);
-    return false;
-  }
-  notes.push(`Clicked join control: ${clicked}`);
-
-  if (/ask to join/i.test(clicked)) {
-    notes.push("Waiting for host admit.");
-    try {
-      await page
-        .getByRole("button", { name: /leave call|end call|present now|share screen/i })
-        .first()
-        .waitFor({ state: "visible", timeout: 120_000 });
-    } catch {
-      notes.push("Still waiting to be admitted.");
-      return false;
+  // Keep trying the Join control — it can take a few seconds to enable, and
+  // Meet sometimes throws up a dialog between clicks.
+  const deadline = Date.now() + 60_000;
+  let clickedOnce: string | null = null;
+  while (Date.now() < deadline) {
+    if (await inMeeting()) {
+      await dismissNoise(page);
+      notes.push("In the meeting.");
+      return true;
     }
+    const clicked = await clickJoinish(page);
+    if (clicked) {
+      if (clicked !== clickedOnce) notes.push(`Clicked join control: ${clicked}`);
+      clickedOnce = clicked;
+      if (/ask to join/i.test(clicked)) notes.push("Asked to join — waiting for the host to admit.");
+    }
+    await dismissNoise(page);
+    await page.waitForTimeout(2000);
   }
 
-  try {
-    await page
-      .getByRole("button", { name: /leave call|end call|present now|share screen/i })
-      .first()
-      .waitFor({ state: "visible", timeout: 30_000 });
-  } catch {
-    notes.push("Join clicked but meeting chrome did not appear.");
-    await dumpMeetDebug(page, notes);
-    return false;
+  if (await inMeeting()) {
+    await dismissNoise(page);
+    notes.push("In the meeting.");
+    return true;
   }
-  await dismissNoise(page);
-  return true;
+
+  notes.push(
+    clickedOnce
+      ? "Join clicked but the meeting did not open (still waiting to be admitted?)."
+      : "Could not find a Join control on this page.",
+  );
+  await dumpMeetDebug(page, notes);
+  return false;
 }
 
 async function presentWorkTab(page: Page, notes: string[]): Promise<boolean> {

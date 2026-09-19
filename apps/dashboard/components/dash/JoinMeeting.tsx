@@ -4,26 +4,18 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button, Input, cx } from "@/components/ui";
 import { Link as LinkIcon, Alert } from "@/components/icons";
-import { PersonaSelect } from "./PersonaSelect";
-import { ACCENT_VAR, DEFAULT_PERSONA_ID, personaById } from "@/lib/personas";
+import { joinMeeting } from "@/lib/session";
 
 const MEET_RE =
   /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\?.*)?$/i;
 
-type Phase = "idle" | "joining" | "joined";
-
 export function JoinMeeting() {
   const router = useRouter();
   const [url, setUrl] = useState("");
-  const [personaId, setPersonaId] = useState(DEFAULT_PERSONA_ID);
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const persona = personaById(personaId);
-  const accent = ACCENT_VAR[persona.accent];
-  const busy = phase !== "idle";
-
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = url.trim();
 
@@ -39,14 +31,16 @@ export function JoinMeeting() {
     }
 
     setError(null);
-    setPhase("joining");
-    // Stands in for POST /sessions. The runner is not wired up yet, so this
-    // lands on the demo replay instead of a live session.
-    window.setTimeout(() => setPhase("joined"), 1400);
-    window.setTimeout(
-      () => router.push("/app/meetings/s_htn_sponsor_01"),
-      2400,
-    );
+    setBusy(true);
+    try {
+      const sessionId = await joinMeeting(trimmed);
+      router.push(`/app/meetings/${sessionId}`);
+    } catch (err) {
+      setError(
+        `Could not reach the agent — is it running on :8787? (${(err as Error).message})`,
+      );
+      setBusy(false);
+    }
   }
 
   return (
@@ -87,13 +81,6 @@ export function JoinMeeting() {
             </div>
           </div>
 
-          <div className="w-full lg:w-[280px]">
-            <label className="mb-1.5 block text-[13px] font-medium text-fg">
-              Persona
-            </label>
-            <PersonaSelect value={personaId} onChange={setPersonaId} />
-          </div>
-
           <Button
             type="submit"
             variant="primary"
@@ -101,9 +88,7 @@ export function JoinMeeting() {
             disabled={busy}
             className="w-full lg:w-auto"
           >
-            {phase === "idle" && "Send the goose"}
-            {phase === "joining" && "Opening the demo…"}
-            {phase === "joined" && "Opening the demo…"}
+            {busy ? "Sending the goose…" : "Send the goose"}
           </Button>
         </div>
 
@@ -120,34 +105,11 @@ export function JoinMeeting() {
         )}
 
         <p className="mt-3 text-[12.5px] leading-snug text-fg-subtle">
-          Demo build — the runner is not wired up yet, so this does not join
-          your room. Whatever you paste opens a recorded meeting so you can
-          watch the gate work end to end.
+          The goose joins as a visible guest in a local Chrome window, then
+          transcribes the room with Gemini. Lines stream in below as people
+          speak.
         </p>
       </form>
-
-      <div className="flex flex-col gap-3 border-t border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-        <p className="flex items-start gap-2 text-[13px] leading-snug text-fg-muted">
-          <span className="dot mt-[6px]" style={{ color: accent }} />
-          <span>
-            <span className="font-medium text-fg">{persona.name}</span>{" "}
-            {persona.purpose}
-          </span>
-        </p>
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-          {persona.tools
-            .filter((t) => t.policy !== "Off")
-            .map((t) => (
-              <span
-                key={t.name}
-                className="rounded-[var(--r-sm)] border border-border bg-bg px-2 py-0.5 text-[12px] text-fg-muted"
-              >
-                {t.name}
-                <span className="ml-1.5 text-fg-subtle">{t.policy}</span>
-              </span>
-            ))}
-        </div>
-      </div>
     </section>
   );
 }

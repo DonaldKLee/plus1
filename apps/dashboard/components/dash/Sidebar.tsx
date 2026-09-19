@@ -4,16 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Wordmark, cx } from "@/components/ui";
-import { Home, History, Persona, Plug, Menu, Close, Shield } from "@/components/icons";
-import { PERSONAS, DEFAULT_PERSONA_ID, ACCENT_VAR, personaById } from "@/lib/personas";
-import { MEETINGS } from "@/lib/meetings";
+import { Home, History, Menu, Close, Shield } from "@/components/icons";
 
 const NAV = [
   { href: "/app", label: "Home", Icon: Home },
   { href: "/app/meetings", label: "Meetings", Icon: History },
   { href: "/app/underwrite", label: "Underwrite", Icon: Shield },
-  { href: "/app/personas", label: "Personas", Icon: Persona },
-  { href: "/app/integrations", label: "Tools", Icon: Plug },
 ];
 
 function isActive(pathname: string, href: string) {
@@ -55,43 +51,6 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-function ArmedPersona() {
-  const live = MEETINGS.find((m) => m.status === "live");
-  const persona = personaById(live?.personaId ?? DEFAULT_PERSONA_ID);
-  const accent = ACCENT_VAR[persona.accent];
-
-  return (
-    <Link
-      href="/app/personas"
-      className="block rounded-[var(--r)] border border-border bg-bg-subtle p-3 transition-colors duration-150 hover:border-border-strong"
-    >
-      <div className="flex items-center gap-1.5">
-        <span className="dot dot-pulse" style={{ color: accent }} />
-        <span className="eyebrow">{live ? "In this meeting" : "Armed persona"}</span>
-      </div>
-      <p className="mt-2 text-[13.5px] font-medium text-fg">{persona.name}</p>
-      <p className="mt-0.5 text-[12.5px] leading-snug text-fg-muted">{persona.role}</p>
-    </Link>
-  );
-}
-
-function Account() {
-  return (
-    <div className="flex items-center gap-2.5 border-t border-border px-2 pt-3">
-      <span
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold"
-        style={{ background: "var(--bg-raise)", color: "var(--fg-muted)" }}
-      >
-        KV
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-medium text-fg">Kevin Gu</p>
-        <p className="truncate text-[12px] text-fg-subtle">{PERSONAS.length} personas</p>
-      </div>
-    </div>
-  );
-}
-
 export function Sidebar() {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
@@ -116,10 +75,6 @@ export function Sidebar() {
       </div>
       <div className="mt-6">
         <NavList onNavigate={() => setOpen(false)} />
-      </div>
-      <div className="mt-auto flex flex-col gap-3 pt-6">
-        <ArmedPersona />
-        <Account />
       </div>
     </>
   );

@@ -1,5 +1,4 @@
 import type { SVGProps } from "react";
-import type { ArtifactKind } from "@/lib/types";
 
 type P = SVGProps<SVGSVGElement>;
 const base = (p: P) => ({
@@ -102,16 +101,3 @@ export const Close = (p: P) => (
 export const Mic = (p: P) => (
   <svg {...base(p)}><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" /></svg>
 );
-
-export function ArtifactIcon({ kind, ...p }: { kind: ArtifactKind } & P) {
-  switch (kind) {
-    case "gmail_draft":
-      return <Mail {...p} />;
-    case "doc_review":
-      return <DocSearch {...p} />;
-    case "notion_update":
-      return <PageMark {...p} />;
-    case "calendar_event":
-      return <Calendar {...p} />;
-  }
-}

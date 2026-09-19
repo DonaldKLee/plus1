@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --import tsx --watch src/server.ts",
+    "dev": "node --import tsx --watch-path=src src/server.ts",
     "start": "node --import tsx src/server.ts",
     "rank": "node --import tsx src/cli.ts rank",
     "deep-dive": "node --import tsx src/cli.ts deep-dive",

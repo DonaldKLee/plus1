@@ -66,13 +66,38 @@ export const Arrow = (p: P) => (
   <svg {...base(p)}><path d="M5 12h14M13 6l6 6-6 6" /></svg>
 );
 
-// the plus1 mark — a "+1" cut into a signal square
-export const Plus1Mark = (p: P) => (
-  <svg viewBox="0 0 24 24" width={22} height={22} fill="none" {...p}>
-    <rect x="1.6" y="1.6" width="20.8" height="20.8" rx="4" stroke="currentColor" strokeWidth="1.6" />
-    <path d="M7 12h4M9 10v4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    <path d="M14 8.4l2-1.2V16.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
+export const Home = (p: P) => (
+  <svg {...base(p)}><path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1v-8.5Z" /></svg>
+);
+export const History = (p: P) => (
+  <svg {...base(p)}><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4.5V9H8" /><path d="M12 7.5V12l3 1.8" /></svg>
+);
+export const Persona = (p: P) => (
+  <svg {...base(p)}><circle cx="12" cy="8.5" r="3.6" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>
+);
+export const Search = (p: P) => (
+  <svg {...base(p)}><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>
+);
+export const Chevron = (p: P) => (
+  <svg {...base(p)}><path d="m6 9.5 6 6 6-6" /></svg>
+);
+export const Plus = (p: P) => (
+  <svg {...base(p)}><path d="M12 5v14M5 12h14" /></svg>
+);
+export const Link = (p: P) => (
+  <svg {...base(p)}><path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.8-2.8a4 4 0 0 0-5.7-5.7l-1.6 1.6" /><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.8 2.8a4 4 0 1 0 5.7 5.7l1.6-1.6" /></svg>
+);
+export const Clock = (p: P) => (
+  <svg {...base(p)}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.2V12l3.2 1.9" /></svg>
+);
+export const Menu = (p: P) => (
+  <svg {...base(p)}><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+);
+export const Close = (p: P) => (
+  <svg {...base(p)}><path d="M6 6l12 12M18 6 6 18" /></svg>
+);
+export const Mic = (p: P) => (
+  <svg {...base(p)}><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" /></svg>
 );
 
 export function ArtifactIcon({ kind, ...p }: { kind: ArtifactKind } & P) {

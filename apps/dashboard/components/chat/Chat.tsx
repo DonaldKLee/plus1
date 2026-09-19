@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { GooseMark, Button, Chip, cx } from "@/components/ui";
+import { Plus1Mark, Button, Chip, cx } from "@/components/ui";
 import { History, Plug } from "@/components/icons";
 import { createChat, sendChatMessage, type ChatMessage } from "@/lib/chat";
 import { QuoteCard } from "./QuoteCard";
@@ -10,14 +10,14 @@ import { QuoteCard } from "./QuoteCard";
 function readConfig(): { name?: string; servers?: Record<string, boolean>; localAccess?: string } {
   if (typeof window === "undefined") return {};
   try {
-    return JSON.parse(window.localStorage.getItem("plus1.goose.config") || "{}");
+    return JSON.parse(window.localStorage.getItem("plus1.plus1.config") || "{}");
   } catch {
     return {};
   }
 }
 
-function gooseName(): string {
-  return readConfig().name?.trim() || "Goose";
+function plus1Name(): string {
+  return readConfig().name?.trim() || "plus1";
 }
 
 type Tools = { federato: boolean; files: "off" | "read" | "write" };
@@ -39,7 +39,7 @@ const mkLocal = (role: ChatMessage["role"], text: string, kind: ChatMessage["kin
 });
 
 export function Chat() {
-  const [name] = useState(gooseName);
+  const [name] = useState(plus1Name);
   const [tools, setTools] = useState<Tools>({ federato: true, files: "off" });
   const [chatId, setChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -69,7 +69,7 @@ export function Chat() {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, sending]);
 
-  // Keep the tool badges in sync with the Goose tab (which may be edited elsewhere).
+  // Keep the tool badges in sync with the plus1 tab (which may be edited elsewhere).
   useEffect(() => {
     const sync = () => setTools(readTools());
     sync();
@@ -104,12 +104,12 @@ export function Chat() {
       {/* header */}
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-5 py-3.5 sm:px-7">
         <div className="flex items-center gap-2.5">
-          <GooseMark size={22} className="text-fg" />
+          <Plus1Mark size={22} className="text-fg" />
           <div className="leading-tight">
             <h1 className="text-[15px] font-semibold tracking-[-0.02em] text-fg">{name}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
               {tools.federato && <Chip color="var(--act)">federato</Chip>}
-              <Link href="/app/goose" title="configure in the Goose tab">
+              <Link href="/app/plus1" title="configure in the plus1 tab">
                 <Chip
                   color={
                     tools.files === "write"
@@ -149,7 +149,7 @@ export function Chat() {
               </div>
             ) : m.kind === "quote" && m.quote ? (
               <div key={m.id} className="flex gap-2.5">
-                <GooseMark size={22} className="mt-0.5 shrink-0 text-fg" />
+                <Plus1Mark size={22} className="mt-0.5 shrink-0 text-fg" />
                 <div className="min-w-0 max-w-[92%] flex-1">
                   <QuoteCard q={m.quote} />
                 </div>
@@ -169,7 +169,7 @@ export function Chat() {
               </div>
             ) : (
               <div key={m.id} className="flex gap-2.5">
-                <GooseMark size={22} className="mt-0.5 shrink-0 text-fg" />
+                <Plus1Mark size={22} className="mt-0.5 shrink-0 text-fg" />
                 <div className="max-w-[80%] rounded-[var(--r-lg)] rounded-tl-[4px] border border-border bg-bg-subtle px-3.5 py-2 text-[14px] leading-relaxed text-fg">
                   {m.text}
                 </div>
@@ -179,7 +179,7 @@ export function Chat() {
 
           {sending && (
             <div className="flex gap-2.5">
-              <GooseMark size={22} className="mt-0.5 shrink-0 text-fg" />
+              <Plus1Mark size={22} className="mt-0.5 shrink-0 text-fg" />
               <div className="flex items-center gap-1 rounded-[var(--r-lg)] rounded-tl-[4px] border border-border bg-bg-subtle px-3.5 py-3">
                 <Dotty /> <Dotty d={0.15} /> <Dotty d={0.3} />
               </div>

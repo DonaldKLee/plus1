@@ -35,7 +35,7 @@ const snapA = await page.evaluate(() => window.__plus1Avatar.snapshot());
 await new Promise((r) => setTimeout(r, 700));
 const snapB = await page.evaluate(() => window.__plus1Avatar.snapshot());
 result.videoFramesChange = snapA !== snapB;
-result.centerPixel = await page.evaluate(() => Array.from(window.__gooseCanvas.getContext("2d").getImageData(640, 360, 1, 1).data));
+result.centerPixel = await page.evaluate(() => Array.from(window.__plus1Canvas.getContext("2d").getImageData(640, 360, 1, 1).data));
 
 // Speak: 1.5 s tone straight through the avatar (bypasses ElevenLabs quota).
 await page.evaluate(() => window.__plus1Avatar.setAvatarMuted(false));

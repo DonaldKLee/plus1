@@ -7,10 +7,10 @@ export function cx(...parts: (string | false | null | undefined)[]) {
 /* ---------------------------------------------------------------- brand ---- */
 
 /**
- * The plus1 mark: a Canada goose head in profile, beak in brand amber, with a
+ * The plus1 mark: a Canada plus1 head in profile, beak in brand amber, with a
  * suit collar at the neck. Two-tone so it survives on either theme.
  */
-export function GooseMark({ size = 24, ...p }: SVGProps<SVGSVGElement> & { size?: number }) {
+export function Plus1Mark({ size = 24, ...p }: SVGProps<SVGSVGElement> & { size?: number }) {
   return (
     <svg viewBox="0 0 32 32" width={size} height={size} fill="none" aria-hidden {...p}>
       {/* neck, sweeping down and left out of the head */}
@@ -28,7 +28,7 @@ export function GooseMark({ size = 24, ...p }: SVGProps<SVGSVGElement> & { size?
 export function Wordmark({ className, markSize = 22 }: { className?: string; markSize?: number }) {
   return (
     <span className={cx("inline-flex items-center gap-2", className)}>
-      <GooseMark size={markSize} className="text-fg" />
+      <Plus1Mark size={markSize} className="text-fg" />
       <span className="text-[16px] font-semibold tracking-[-0.03em] text-fg">plus1</span>
     </span>
   );

@@ -8,7 +8,7 @@ import { report } from "./events.js";
 
 declare global {
   interface Window {
-    __gooseCanvas?: HTMLCanvasElement;
+    __plus1Canvas?: HTMLCanvasElement;
     __audioCtx?: AudioContext;
     __audioDest?: MediaStreamAudioDestinationNode;
     __plus1AvatarConfig?: Partial<PageMediaConfig>;
@@ -31,8 +31,8 @@ let gumCalls = 0;
 export function getBus(config: PageMediaConfig): MediaBus {
   if (bus) return bus;
   // Adopt a bus the early bundle already created (its tracks are what Meet is holding).
-  if (window.__gooseCanvas && window.__audioCtx && window.__audioDest) {
-    bus = { canvas: window.__gooseCanvas, ctx: window.__audioCtx, dest: window.__audioDest, fps: config.fps };
+  if (window.__plus1Canvas && window.__audioCtx && window.__audioDest) {
+    bus = { canvas: window.__plus1Canvas, ctx: window.__audioCtx, dest: window.__audioDest, fps: config.fps };
     keepContextRunning(bus.ctx);
     return bus;
   }
@@ -41,7 +41,7 @@ export function getBus(config: PageMediaConfig): MediaBus {
   canvas.height = config.height;
   const ctx = new AudioContext({ sampleRate: 48_000, latencyHint: "interactive" });
   const dest = ctx.createMediaStreamDestination();
-  window.__gooseCanvas = canvas;
+  window.__plus1Canvas = canvas;
   window.__audioCtx = ctx;
   window.__audioDest = dest;
   bus = { canvas, ctx, dest, fps: config.fps };

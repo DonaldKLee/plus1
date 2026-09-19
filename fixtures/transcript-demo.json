@@ -3,7 +3,7 @@
     "sessionId": "s_htn_sponsor_01",
     "meetTitle": "HTN — Sponsorship sync",
     "meetUrl": "https://meet.google.com/abc-defg-hij",
-    "gooseName": "Reginald",
+    "plus1Name": "Reginald",
     "personaStyle": "deferential intern, dry",
     "startedAtLabel": "10:04 AM",
     "participants": [
@@ -424,7 +424,7 @@
       "kind": "utterance",
       "speaker": "Kevin",
       "source": "caption",
-      "text": "perfect. good goose. that's everything — thanks all",
+      "text": "perfect. good plus1. that's everything — thanks all",
       "gate": { "intent": "small_talk", "confidence": 0.1, "requires_response": false, "urgency": "async" }
     },
     {

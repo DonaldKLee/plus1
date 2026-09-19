@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Panel, PanelHead, Input, GooseMark, Chip, Dot, Button, cx } from "@/components/ui";
+import { Panel, PanelHead, Input, Plus1Mark, Chip, Dot, Button, cx } from "@/components/ui";
 import { Shield, Plug, PageMark, Check, Plus } from "@/components/icons";
 import {
   activeSessionId,
-  fetchGooseConfig,
-  saveGooseConfig,
+  fetchplus1Config,
+  saveplus1Config,
   updateSessionConfig,
 } from "@/lib/session";
 
@@ -28,7 +28,7 @@ interface Config {
 }
 
 const DEFAULT_CONFIG: Config = {
-  name: "Bob",
+  name: "Shannon",
   voice: "reginald",
   autonomy: 45,
   confidence: 68,
@@ -39,7 +39,7 @@ const DEFAULT_CONFIG: Config = {
   localAccess: "read",
 };
 
-const STORAGE_KEY = "plus1.goose.config";
+const STORAGE_KEY = "plus1.plus1.config";
 
 /** Fill in anything a stored config is missing, whatever its source. */
 function normalize(p: Partial<Config>): Config {
@@ -267,7 +267,7 @@ function autonomyWord(v: number) {
 }
 
 function behaviorSentence(c: Config): string {
-  const name = c.name.trim() || "The goose";
+  const name = c.name.trim() || "The plus1";
   const stance =
     c.autonomy < 34
       ? "mostly listens and takes notes, speaking only when addressed"
@@ -281,7 +281,7 @@ function behaviorSentence(c: Config): string {
 
 /* -------------------------------------------------------------- screen ---- */
 
-export function GooseConfig() {
+export function Plus1Config() {
   const [config, setConfig] = useState<Config>(DEFAULT_CONFIG);
   const [ready, setReady] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -298,7 +298,7 @@ export function GooseConfig() {
     // Paint this browser's cached copy immediately, then let MongoDB win.
     setConfig(loadConfig());
     (async () => {
-      const stored = await fetchGooseConfig();
+      const stored = await fetchplus1Config();
       if (alive && stored) {
         setConfig(normalize(stored as Partial<Config>));
         setRemote(true);
@@ -325,7 +325,7 @@ export function GooseConfig() {
     }
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      void saveGooseConfig(config as unknown as Record<string, unknown>).then((ok) => {
+      void saveplus1Config(config as unknown as Record<string, unknown>).then((ok) => {
         setRemote(ok);
         setSaved(true);
         if (savedTimer.current) clearTimeout(savedTimer.current);
@@ -333,7 +333,7 @@ export function GooseConfig() {
       });
     }, 400);
     // If a meeting is live, push the change to it (debounced), so settings tune
-    // the goose mid-meeting — no rejoin needed.
+    // the plus1 mid-meeting — no rejoin needed.
     const sid = activeSessionId();
     if (sid) {
       if (liveTimer.current) clearTimeout(liveTimer.current);
@@ -357,7 +357,7 @@ export function GooseConfig() {
     };
   }, [config, ready]);
 
-  const displayName = config.name.trim() || "the goose";
+  const displayName = config.name.trim() || "the plus1";
   const enabledCount = Object.values(config.servers).filter(Boolean).length;
   const sentence = useMemo(() => behaviorSentence(config), [config]);
 
@@ -375,7 +375,7 @@ export function GooseConfig() {
 
       {/* live behaviour summary — reads the whole config back in plain English */}
       <div className="flex items-start gap-3 rounded-[var(--r)] border border-border bg-bg-subtle p-4">
-        <GooseMark size={26} className="mt-0.5 shrink-0 text-fg" />
+        <Plus1Mark size={26} className="mt-0.5 shrink-0 text-fg" />
         <div className="min-w-0">
           <span className="eyebrow">How it behaves</span>
           <p className="mt-1 text-[15px] leading-relaxed text-fg">{sentence}</p>
@@ -396,13 +396,13 @@ export function GooseConfig() {
               onChange={(e) => set("name", e.target.value)}
             />
             <p className="mt-2 text-[12.5px] leading-relaxed text-fg-muted">
-              What the goose is called, out loud and in the meeting chat.
+              What the plus1 is called, out loud and in the meeting chat.
             </p>
           </label>
           <div>
             <span className="eyebrow mb-1.5 block">In the call</span>
             <div className="flex items-center gap-2.5 rounded-[var(--r-sm)] border border-border bg-bg px-3 py-2.5">
-              <GooseMark size={22} className="shrink-0 text-fg" />
+              <Plus1Mark size={22} className="shrink-0 text-fg" />
               <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-fg">{displayName}</span>
               <Chip color="var(--act)">AI</Chip>
             </div>
@@ -463,7 +463,7 @@ export function GooseConfig() {
               ariaLabel="Autonomy"
             />
             <p className="mt-2 text-[12.5px] leading-relaxed text-fg-muted">
-              How far the goose goes on its own — from quietly capturing the meeting to drafting emails
+              How far the plus1 goes on its own — from quietly capturing the meeting to drafting emails
               and running tools as the conversation happens.
             </p>
           </div>
@@ -482,7 +482,7 @@ export function GooseConfig() {
               ariaLabel="Confidence threshold"
             />
             <p className="mt-2 text-[12.5px] leading-relaxed text-fg-muted">
-              Below this, the goose says it isn&rsquo;t sure and asks instead of answering.
+              Below this, the plus1 says it isn&rsquo;t sure and asks instead of answering.
             </p>
           </div>
 
@@ -491,7 +491,7 @@ export function GooseConfig() {
             <div className="min-w-0">
               <span className="text-[13px] font-medium text-fg">Honk</span>
               <p className="mt-1 max-w-[52ch] text-[12.5px] leading-relaxed text-fg-muted">
-                The goose honks on disagreement, on a long monologue, and any time someone types
+                The plus1 honks on disagreement, on a long monologue, and any time someone types
                 <span className="tnum"> /honk</span> in the chat.
               </p>
             </div>
@@ -563,8 +563,8 @@ export function GooseConfig() {
                         <Segmented value={config.localAccess} onChange={(n) => set("localAccess", n)} />
                         <span className="text-[12px] text-fg-subtle">
                           {config.localAccess === "write"
-                            ? "The goose can read and modify files."
-                            : "The goose can read files but not change them."}
+                            ? "The plus1 can read and modify files."
+                            : "The plus1 can read files but not change them."}
                         </span>
                       </div>
                     )}
@@ -583,9 +583,9 @@ export function GooseConfig() {
 
       <p className="text-[12.5px] text-fg-subtle">
         {remote
-          ? "Stored in MongoDB, so they follow the goose across browsers and restarts."
-          : "Stored in this browser — set MONGODB_URI on the backend to keep them with the goose."}{" "}
-        These settings tell the goose how to behave and which tools it may use in a meeting.
+          ? "Stored in MongoDB, so they follow the plus1 across browsers and restarts."
+          : "Stored in this browser — set MONGODB_URI on the backend to keep them with the plus1."}{" "}
+        These settings tell the plus1 how to behave and which tools it may use in a meeting.
       </p>
     </div>
   );

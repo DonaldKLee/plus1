@@ -1,9 +1,9 @@
 /**
- * Local file access, exposed to the goose as tools (read_file / list_files /
+ * Local file access, exposed to the plus1 as tools (read_file / list_files /
  * write_file). Everything is scoped to a single sandbox directory and every path
- * is contained inside it — the goose can never touch anything above the root.
+ * is contained inside it — the plus1 can never touch anything above the root.
  *
- * Enabling and read-vs-write are gated by the session's Goose config upstream;
+ * Enabling and read-vs-write are gated by the session's plus1 config upstream;
  * this module just does the (contained) filesystem work.
  */
 import { mkdir, readFile, writeFile, readdir, stat } from "node:fs/promises";
@@ -15,11 +15,11 @@ export const WRITE_TOOLS: FileTool[] = ["write_file"];
 
 const MAX_READ_CHARS = 4000; // keep chat/relay sane
 
-/** The one directory the goose is allowed to touch. */
+/** The one directory the plus1 is allowed to touch. */
 export function filesRoot(): string {
-  return process.env.GOOSE_FILES_DIR
-    ? resolve(process.env.GOOSE_FILES_DIR)
-    : join(process.cwd(), "goose-files");
+  return process.env.plus1_FILES_DIR
+    ? resolve(process.env.plus1_FILES_DIR)
+    : join(process.cwd(), "plus1-files");
 }
 
 /** Resolve `p` inside `root`, refusing anything that escapes it. */

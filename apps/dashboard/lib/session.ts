@@ -1,4 +1,4 @@
-// Client for the backend "send a goose" transcription endpoints.
+// Client for the backend "send a plus1" transcription endpoints.
 // The backend joins the Meet, transcribes with Gemini, and streams lines over SSE.
 
 export const AGENT_URL =
@@ -19,8 +19,8 @@ export interface TranscriptLine {
   at: string; // ISO wall clock
   text: string;
   partial?: boolean; // still being spoken
-  agent?: boolean; // the goose's own voice
-  speaker?: string; // the goose's display name on its lines
+  agent?: boolean; // the plus1's own voice
+  speaker?: string; // the plus1's display name on its lines
 }
 
 /** LiveAvatar state as reported by the agent over SSE (`avatar` events). */
@@ -84,7 +84,7 @@ export interface SessionDetail {
 export interface MeetingStats {
   meetings: number;
   lines: number;
-  gooseLines: number;
+  plus1Lines: number;
   totalDurationMs: number;
 }
 
@@ -96,11 +96,11 @@ export const STATUS_LABEL: Record<SessionStatus, string> = {
   error: "Error",
 };
 
-/** The goose config saved by the Goose tab, sent to the backend on join. */
-export function readGooseConfig(): Record<string, unknown> | undefined {
+/** The plus1 config saved by the plus1 tab, sent to the backend on join. */
+export function readplus1Config(): Record<string, unknown> | undefined {
   if (typeof window === "undefined") return undefined;
   try {
-    const raw = window.localStorage.getItem("plus1.goose.config");
+    const raw = window.localStorage.getItem("plus1.plus1.config");
     if (!raw) return undefined;
     const c = JSON.parse(raw) as Record<string, unknown>;
     // Only the fields the backend actually reads.
@@ -119,7 +119,7 @@ export function readGooseConfig(): Record<string, unknown> | undefined {
 
 const ACTIVE_KEY = "plus1.activeSession";
 
-/** The most recently joined session, so the Goose tab can tune it mid-meeting. */
+/** The most recently joined session, so the plus1 tab can tune it mid-meeting. */
 export function activeSessionId(): string | null {
   if (typeof window === "undefined") return null;
   try {
@@ -131,7 +131,7 @@ export function activeSessionId(): string | null {
 
 export async function joinMeeting(meetUrl: string, purpose?: string): Promise<string> {
   // Prefer the config stored in MongoDB; fall back to this browser's copy.
-  const config = (await fetchGooseConfig()) ?? readGooseConfig();
+  const config = (await fetchplus1Config()) ?? readplus1Config();
   const res = await fetch(`${AGENT_URL}/api/meet/join`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -148,7 +148,7 @@ export async function joinMeeting(meetUrl: string, purpose?: string): Promise<st
   return sessionId;
 }
 
-/** Push updated goose config to a live session (takes effect on the next turn). */
+/** Push updated plus1 config to a live session (takes effect on the next turn). */
 export async function updateSessionConfig(
   id: string,
   config: Record<string, unknown>,
@@ -219,7 +219,7 @@ async function post(path: string, body?: unknown): Promise<any> {
   return json;
 }
 
-/** Make the goose say something (text → ElevenLabs → LiveAvatar → Meet). */
+/** Make the plus1 say something (text → ElevenLabs → LiveAvatar → Meet). */
 export function speak(id: string, text: string): Promise<{ id: string }> {
   return post(`/api/meet/sessions/${id}/speak`, { text });
 }
@@ -248,10 +248,10 @@ export async function renameMeeting(id: string, purpose: string): Promise<boolea
   return Boolean(res?.ok);
 }
 
-/** The goose config stored in MongoDB, or null when nothing is saved yet. */
-export async function fetchGooseConfig(): Promise<Record<string, unknown> | null> {
+/** The plus1 config stored in MongoDB, or null when nothing is saved yet. */
+export async function fetchplus1Config(): Promise<Record<string, unknown> | null> {
   try {
-    const res = await fetch(`${AGENT_URL}/api/goose/config`, { cache: "no-store" });
+    const res = await fetch(`${AGENT_URL}/api/plus1/config`, { cache: "no-store" });
     if (!res.ok) return null;
     const json = await res.json();
     return (json.config ?? null) as Record<string, unknown> | null;
@@ -260,10 +260,10 @@ export async function fetchGooseConfig(): Promise<Record<string, unknown> | null
   }
 }
 
-/** Persist the goose config to MongoDB. Returns false if it could not be saved. */
-export async function saveGooseConfig(config: Record<string, unknown>): Promise<boolean> {
+/** Persist the plus1 config to MongoDB. Returns false if it could not be saved. */
+export async function saveplus1Config(config: Record<string, unknown>): Promise<boolean> {
   try {
-    const res = await fetch(`${AGENT_URL}/api/goose/config`, {
+    const res = await fetch(`${AGENT_URL}/api/plus1/config`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ config }),

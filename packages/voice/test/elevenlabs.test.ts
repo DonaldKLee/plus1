@@ -10,7 +10,7 @@ afterEach(() => mock.stop());
 const make = (o: Partial<ConstructorParameters<typeof ElevenLabsTts>[0]> = {}) => new ElevenLabsTts({ apiKey: "el-key", baseUrl: mock.baseUrl, ...o });
 
 describe("ElevenLabsTts", () => {
-  it("requests pcm_24000 on the stream endpoint with the goose voice settings and streams aligned chunks", async () => {
+  it("requests pcm_24000 on the stream endpoint with the plus1 voice settings and streams aligned chunks", async () => {
     const tts = make({ voiceId: "v1" });
     const chunks: Uint8Array[] = [];
     for await (const c of tts.synthesize("hey, what are we working on today?", { signal: new AbortController().signal })) chunks.push(c);

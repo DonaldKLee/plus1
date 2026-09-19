@@ -36,7 +36,7 @@ Vercel's dashboard, where color appears only when something is true.
 OWN-WORLD: Near-black ground `#08090a`, raised panels `#0d0e10`, hairline borders `#1e2022`,
 Geist 400/500/600 for chrome and Geist Mono with tabular figures for every measured value.
 Radius 8px on panels, 6px on controls. Primary actions are white-on-black, the Vercel move;
-the brand amber `#FFB224` marks identity only — the wordmark, the goose avatar, the active-nav
+the brand amber `#FFB224` marks identity only — the wordmark, the plus1 avatar, the active-nav
 rail. The four state hues are the sole other color and each names one meeting state: emerald
 heard, violet reasoning, sky acting, rose honk. No glow, no gradient, no ornament that is not a
 reading.

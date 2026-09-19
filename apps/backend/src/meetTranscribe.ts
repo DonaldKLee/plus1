@@ -1,14 +1,14 @@
 /**
- * Send a goose: join a Google Meet in a local Playwright Chrome, tap every
+ * Send a plus1: join a Google Meet in a local Playwright Chrome, tap every
  * remote audio stream via Web Audio, and stream the PCM to Gemini's Live API
  * (a persistent WebSocket) for real-time transcription. Lines stream to the
  * dashboard over SSE (see server.ts), updating live as each person speaks.
  *
- * The same session is also the goose on camera: a HeyGen LiveAvatar (packages/liveavatar) is
+ * The same session is also the plus1 on camera: a HeyGen LiveAvatar (packages/liveavatar) is
  * the tab's fake camera + mic, voiced by ElevenLabs (packages/voice). The brain (agentBrain.ts)
- * decides; the rig speaks. A room transcription fragment while the goose is talking interrupts
+ * decides; the rig speaks. A room transcription fragment while the plus1 is talking interrupts
  * it (barge-in, HLD §5.5). The room audio tap skips the avatar's own playback elements
- * (data-plus1-avatar) so the goose never transcribes itself.
+ * (data-plus1-avatar) so the plus1 never transcribes itself.
  */
 
 import { randomUUID } from "node:crypto";
@@ -18,9 +18,10 @@ import type { BrowserContext, Page } from "playwright-core";
 import { AvatarRig, LiveAvatarClient, type Emote } from "@plus1/liveavatar";
 import { FillerCache, voiceFromEnv, type ElevenLabsTts, type FillerKind } from "@plus1/voice";
 import { env, envOptional } from "./env.js";
+import { plus1Config } from "./plus1Config.js";
 import { joinMeet, launchMeetChrome } from "./meetPresent.js";
 import {
-  GOOSE_NAME,
+  plus1_NAME,
   applyStateUpdate,
   decideAction,
   emptyState,
@@ -33,7 +34,7 @@ import {
 } from "./agentBrain.js";
 import { executeTool } from "./tools.js";
 import {
-  getGooseSettings,
+  getplus1Settings,
   getMeeting,
   listMeetings,
   previewOf,
@@ -42,7 +43,7 @@ import {
   storeEnabled,
 } from "./store.js";
 
-/** Ignore transcription fragments this soon after the goose stopped: they're often its own tail. */
+/** Ignore transcription fragments this soon after the plus1 stopped: they're often its own tail. */
 const BARGE_IN_GUARD_MS = 400;
 
 // Auto-act tuning.
@@ -93,8 +94,8 @@ export interface TranscriptLine {
   at: string; // ISO wall clock
   text: string;
   partial?: boolean; // true while the line is still being spoken
-  agent?: boolean; // a line the goose spoke (via the avatar)
-  speaker?: string; // the goose's name on its own lines
+  agent?: boolean; // a line the plus1 spoke (via the avatar)
+  speaker?: string; // the plus1's name on its own lines
 }
 
 export interface AvatarStatus {
@@ -135,19 +136,19 @@ interface Session {
   lastActionAt?: number;
   quotaNotedAt?: number;
   remoteStreams?: number; // tapped remote audio streams ≈ other participants
-  // ── the goose on camera ──
+  // ── the plus1 on camera ──
   rig?: AvatarRig;
   tts?: ElevenLabsTts;
   fillers?: FillerCache;
   avatar: AvatarStatus;
   lastSpeechEndedAt: number;
-  config?: SessionConfig; // from the dashboard's Goose tab
+  config?: SessionConfig; // from the dashboard's plus1 tab
   memory: string[]; // standing instructions + facts to honor every turn
   state: MeetingState; // slot filling: active task, collected params, what's missing
   muted?: boolean; // chat-only mode: keep listening, but type instead of speak
 }
 
-/** Per-session goose configuration, sent from the dashboard on join. */
+/** Per-session plus1 configuration, sent from the dashboard on join. */
 export interface SessionConfig {
   name?: string;
   autonomy?: number; // 0 = notetaker, 100 = action taker
@@ -159,7 +160,7 @@ export interface SessionConfig {
 
 /** Configured display name, falling back to the code default. */
 function nameOf(s: Session): string {
-  return s.config?.name?.trim() || GOOSE_NAME;
+  return s.config?.name?.trim() || plus1_NAME;
 }
 
 /** Confidence threshold: the tab's 0..100 slider, or the env/default. */
@@ -173,7 +174,7 @@ function autonomyOf(s: Session): number {
   return typeof a === "number" ? a : 50;
 }
 
-/** Which tools this session may use, from the Goose config's server toggles. */
+/** Which tools this session may use, from the plus1 config's server toggles. */
 function toolAccessOf(s: Session): ToolAccess {
   const servers = s.config?.servers;
   const files: ToolAccess["files"] = !servers?.local
@@ -276,7 +277,7 @@ async function closeContext(s: Session): Promise<void> {
 /** A note visible to the operator (SSE `note` event) plus the server console. */
 function note(s: Session, msg: string): void {
   s.notes.push(msg);
-  console.log(`[goose ${s.id.slice(0, 8)}] ${msg}`);
+  console.log(`[plus1 ${s.id.slice(0, 8)}] ${msg}`);
   emit(s, "note", { msg });
   persist(s);
 }
@@ -413,7 +414,7 @@ export function startMeetTranscription(
 }
 
 /**
- * Update a live session's goose config mid-meeting. The brain reads name /
+ * Update a live session's plus1 config mid-meeting. The brain reads name /
  * autonomy / confidence / tool access fresh every turn, so a merge here takes
  * effect on the next decision — no rejoin needed. (The Meet display name is
  * fixed at join; everything else is live.)
@@ -451,12 +452,12 @@ export async function stopSession(id: string): Promise<boolean> {
 
 async function runSession(s: Session): Promise<void> {
   // No config from the dashboard (e.g. a curl join, or a fresh browser)? Use
-  // whatever the Goose tab last saved to MongoDB.
+  // whatever the plus1 tab last saved to MongoDB.
   if (!s.config) {
-    const stored = (await getGooseSettings()) as SessionConfig | null;
+    const stored = (await getplus1Settings()) as SessionConfig | null;
     if (stored) {
       s.config = stored;
-      note(s, `Loaded saved goose settings (name=${nameOf(s)}, autonomy=${autonomyOf(s)}).`);
+      note(s, `Loaded saved plus1 settings (name=${nameOf(s)}, autonomy=${autonomyOf(s)}).`);
     }
   }
 
@@ -483,7 +484,7 @@ async function runSession(s: Session): Promise<void> {
   const page = context.pages()[0] ?? (await context.newPage());
   s.page = page;
 
-  // The goose's face and voice. Must be prepared BEFORE navigating: the (tiny) init script
+  // The plus1's face and voice. Must be prepared BEFORE navigating: the (tiny) init script
   // replaces getUserMedia so the camera/mic Meet acquires are the avatar canvas and mixer.
   const rig = await prepareAvatar(s, page);
 
@@ -510,7 +511,7 @@ async function runSession(s: Session): Promise<void> {
   page.on("load", () => void rig?.reattach());
 
   s.startedAt = Date.now();
-  if (!rig) note(s, "No LIVEAVATAR_API_KEY — the goose can chat and use tools, but has no face or voice.");
+  if (!rig) note(s, "No LIVEAVATAR_API_KEY — the plus1 can chat and use tools, but has no face or voice.");
   openLive(s);
   await startAudioCapture(page, s);
   setStatus(s, "listening");
@@ -584,10 +585,10 @@ async function handleLiveMessage(s: Session, data: unknown): Promise<void> {
 function appendFragment(s: Session, frag: string): void {
   if (s.gapTimer) clearTimeout(s.gapTimer);
 
-  // Barge-in: a human is talking while the goose speaks → cut the goose off (mechanical, no decision).
+  // Barge-in: a human is talking while the plus1 speaks → cut the plus1 off (mechanical, no decision).
   if (s.rig?.isSpeaking && Date.now() - s.lastSpeechEndedAt > BARGE_IN_GUARD_MS && frag.trim()) {
     s.rig.interrupt();
-    note(s, `Barge-in: someone spoke over the goose ("${frag.trim().slice(0, 40)}").`);
+    note(s, `Barge-in: someone spoke over the plus1 ("${frag.trim().slice(0, 40)}").`);
   }
 
   let line = s.currentLineId
@@ -635,12 +636,12 @@ function scheduleBrain(s: Session, delayMs = BRAIN_DEBOUNCE_MS): void {
 }
 
 // Cheap local gate so we only spend a Gemini call when a line plausibly needs
-// the goose — a name mention, a question, or a request. Keeps us well within
+// the plus1 — a name mention, a question, or a request. Keeps us well within
 // free-tier daily quotas and makes the brain react to real triggers.
-const ADDRESSED_RE = /\bbob\b|\bgoose\b|\bplus[\s-]?(one|1)\b/i;
+const ADDRESSED_RE = /\bbob\b|\bplus1\b|\bplus[\s-]?(one|1)\b/i;
 const REQUEST_RE =
   /\b(can|could|would|will|please|draft|write|send|email|schedule|book|check|look\s?up|find|search|summar|remind|add|create|what('?s| is| are)|who('?s| is)|when|where|how|why|should we|do we)\b/i;
-// An open task floated to the room — cues the goose can volunteer for.
+// An open task floated to the room — cues the plus1 can volunteer for.
 const OPEN_TASK_RE =
   /\b(can someone|could someone|who can|who wants|we should|we need to|someone needs to|let'?s|to-?do|action item|any volunteers|who'?s going to)\b/i;
 
@@ -679,7 +680,7 @@ function rememberFrom(s: Session, items?: string[]): void {
   if (s.memory.length > MEMORY_CAP) s.memory = s.memory.slice(-MEMORY_CAP);
 }
 
-/** Addressed by the "goose"/"plus one" aliases or the session's configured name. */
+/** Addressed by the "plus1"/"plus one" aliases or the session's configured name. */
 function isAddressed(s: Session, text: string): boolean {
   if (ADDRESSED_RE.test(text)) return true;
   const name = nameOf(s);
@@ -689,17 +690,17 @@ function isAddressed(s: Session, text: string): boolean {
 
 function isOneOnOne(s: Session): boolean {
   // remoteStreams counts tapped remote audio streams ≈ other participants.
-  // 1 other person → everything they say is directed at the goose.
+  // 1 other person → everything they say is directed at the plus1.
   return (s.remoteStreams ?? 0) <= 1;
 }
 
 function worthConsidering(s: Session): boolean {
-  // In a 1:1, the other person is talking to the goose — consider every line.
+  // In a 1:1, the other person is talking to the plus1 — consider every line.
   if (isOneOnOne(s)) return true;
   const recent = s.lines.filter((l) => !l.partial && !l.agent).slice(-2);
   const text = recent.map((l) => l.text).join(" ");
   if (!text.trim()) return false;
-  // Goose's job is to catch mistakes and participate, so once it's balanced-or-higher,
+  // plus1's job is to catch mistakes and participate, so once it's balanced-or-higher,
   // or it's holding a standing instruction to watch for something, weigh in on any
   // substantive line and let the planner decide whether it's actually welcome.
   const substantive = text.trim().split(/\s+/).length >= 3;
@@ -790,7 +791,7 @@ async function runBrain(s: Session): Promise<void> {
       emit(s, "decision", record); // update with the real outcome
       persist(s);
     } else {
-      // Still surface the reasoning so the operator sees the goose thinking.
+      // Still surface the reasoning so the operator sees the plus1 thinking.
       record.outcome = decision.action === "none" ? "held" : "below threshold";
       s.decisions.push(record);
       emit(s, "decision", record);
@@ -809,7 +810,7 @@ async function runBrain(s: Session): Promise<void> {
       }
     } else if (err.transient) {
       // Gemini was momentarily overloaded — skip this read, try the next line.
-      console.log(`[goose ${s.id.slice(0, 8)}] brain busy, skipping: ${err.message}`);
+      console.log(`[plus1 ${s.id.slice(0, 8)}] brain busy, skipping: ${err.message}`);
     } else {
       note(s, `brain error: ${err.message}`);
     }
@@ -932,7 +933,7 @@ async function sayInRoom(s: Session, text: string): Promise<SaidResult> {
       // session and re-sends the line. A human interrupting still ends it for
       // good — being cut off is a decision, not a failure.
       const u = s.rig.say(line);
-      gooseLine(s, line, u.done);
+      plus1Line(s, line, u.done);
       const r = await u.done;
       if (r.outcome === "interrupted") return { delivered: true, outcome: "interrupted by a human" };
       if (r.outcome !== "dropped") {
@@ -949,7 +950,7 @@ async function sayInRoom(s: Session, text: string): Promise<SaidResult> {
   const ok = await postToMeetChat(page, `${nameOf(s)}: ${line}`);
   if (ok) {
     // Chat still counts as having said it — keep it in the transcript.
-    gooseLine(s, line, Promise.resolve({ outcome: "completed" }));
+    plus1Line(s, line, Promise.resolve({ outcome: "completed" }));
     return { delivered: true, outcome: s.muted ? "muted; posted to chat" : "posted to chat instead" };
   }
   note(s, `could not deliver to the room: "${line}"`);
@@ -963,14 +964,14 @@ function startFiller(s: Session): Promise<void> | undefined {
   if (!f) return undefined;
   try {
     const u = s.rig.speakPcm(f.pcm, { label: f.phrase });
-    gooseLine(s, f.phrase, u.done);
+    plus1Line(s, f.phrase, u.done);
     return u.done.then(() => undefined).catch(() => undefined);
   } catch {
     return undefined;
   }
 }
 
-// ── The goose on camera (LiveAvatar + ElevenLabs) ─────────────────────────
+// ── The plus1 on camera (LiveAvatar + ElevenLabs) ─────────────────────────
 
 function emitAvatar(s: Session): void {
   emit(s, "avatar", s.avatar);
@@ -979,7 +980,7 @@ function emitAvatar(s: Session): void {
 /** Build the rig if LIVEAVATAR_API_KEY is set; otherwise the session is transcription + chat only. */
 async function prepareAvatar(s: Session, page: Page): Promise<AvatarRig | undefined> {
   const apiKey = envOptional("LIVEAVATAR_API_KEY");
-  const avatarId = envOptional("LIVEAVATAR_AVATAR_ID");
+  const avatarId = envOptional("LIVEAVATAR_AVATAR_ID") ?? plus1Config.liveavatarAvatarId;
   if (!apiKey || !avatarId) return undefined;
   let tts: ElevenLabsTts | undefined;
   try {
@@ -989,7 +990,7 @@ async function prepareAvatar(s: Session, page: Page): Promise<AvatarRig | undefi
     const warmed = await s.fillers.warm();
     note(s, `Voice ready (${warmed.loaded} fillers cached, ${warmed.synthesized} synthesized).`);
   } catch (e) {
-    note(s, `ElevenLabs not configured (${(e as Error).message}); the goose has a face but no voice.`);
+    note(s, `ElevenLabs not configured (${(e as Error).message}); the plus1 has a face but no voice.`);
   }
   const rig = new AvatarRig({
     client: new LiveAvatarClient({ apiKey }),
@@ -1010,8 +1011,8 @@ async function prepareAvatar(s: Session, page: Page): Promise<AvatarRig | undefi
     if (e.phase === "started") { s.avatar.speaking = true; emitAvatar(s); }
     if (e.phase === "ended") { s.avatar.speaking = false; s.lastSpeechEndedAt = Date.now(); emitAvatar(s); }
   });
-  rig.on("warning", (w) => console.log(`[goose ${s.id.slice(0, 8)}] avatar warning: ${w}`));
-  rig.on("error", (e) => console.log(`[goose ${s.id.slice(0, 8)}] avatar error: ${e.message}`));
+  rig.on("warning", (w) => console.log(`[plus1 ${s.id.slice(0, 8)}] avatar warning: ${w}`));
+  rig.on("error", (e) => console.log(`[plus1 ${s.id.slice(0, 8)}] avatar error: ${e.message}`));
   rig.on("ready", () => {
     if (s.startedAt) note(s, "Avatar session ready.");
   });
@@ -1023,8 +1024,8 @@ async function prepareAvatar(s: Session, page: Page): Promise<AvatarRig | undefi
   return rig;
 }
 
-/** A transcript line for something the goose said, updated as it plays. */
-function gooseLine(s: Session, text: string, done: Promise<{ outcome: string }>): void {
+/** A transcript line for something the plus1 said, updated as it plays. */
+function plus1Line(s: Session, text: string, done: Promise<{ outcome: string }>): void {
   const line: TranscriptLine = {
     id: randomUUID(),
     t: s.startedAt ? Date.now() - s.startedAt : 0,
@@ -1055,7 +1056,7 @@ function requireRig(id: string): { s: Session; rig: AvatarRig } {
 export function speakInSession(id: string, text: string): { id: string } {
   const { s, rig } = requireRig(id);
   const u = rig.speakText(text);
-  gooseLine(s, text, u.done);
+  plus1Line(s, text, u.done);
   return { id: u.id };
 }
 
@@ -1065,7 +1066,7 @@ export function fillerInSession(id: string, kind: FillerKind = "ack"): { id: str
   const f = s.fillers?.pick(kind);
   if (!f) return null;
   const u = rig.speakPcm(f.pcm, { label: f.phrase });
-  gooseLine(s, f.phrase, u.done);
+  plus1Line(s, f.phrase, u.done);
   return { id: u.id, phrase: f.phrase };
 }
 
@@ -1158,7 +1159,7 @@ async function startAudioCapture(page: Page, s: Session): Promise<void> {
           get: desc.get,
           set(this: HTMLMediaElement, v: MediaStream | null) {
             desc.set!.call(this, v);
-            if (this.dataset && this.dataset.plus1Avatar) return; // the goose's own voice/video, not the room
+            if (this.dataset && this.dataset.plus1Avatar) return; // the plus1's own voice/video, not the room
             tap(v);
           },
         });

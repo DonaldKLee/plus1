@@ -1,5 +1,5 @@
 /**
- * The goose's brain: read the live meeting transcript, decide whether to act,
+ * The plus1's brain: read the live meeting transcript, decide whether to act,
  * and carry the action out (post to Meet chat, speak via ElevenLabs, or call a
  * tool). Gemini does the reasoning — network-bound, so it lives here in the
  * agent, not in packages/brain (which stays pure per the project constraint).
@@ -7,6 +7,7 @@
 
 import type { Page } from "playwright-core";
 import { env, envOptional } from "./env.js";
+import { plus1Config } from "./plus1Config.js";
 import { rankQueue } from "./rank.js";
 
 // gemini-flash-latest currently maps to gemini-3.8-flash (only 20 free req/day).
@@ -115,7 +116,7 @@ Never ask for anything listed in collected_parameters; you already have it. Neve
 `;
 }
 
-/** Which tools this session may use. Built from the dashboard Goose config. */
+/** Which tools this session may use. Built from the dashboard plus1 config. */
 export interface ToolAccess {
   federato?: boolean;
   intact?: boolean;
@@ -170,7 +171,7 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
 }
 
 /** Default display name if the session config doesn't set one. */
-export const GOOSE_NAME = envOptional("AGENT_NAME") ?? envOptional("GOOSE_NAME") ?? "Bob";
+export const plus1_NAME = envOptional("AGENT_NAME") ?? plus1Config.defaultName;
 
 /** 0 = pure notetaker, 100 = eager action-taker. */
 function autonomyStance(autonomy: number): string {
@@ -215,7 +216,7 @@ HOW YOU TALK (this is a live audio call — pacing matters):
 - Acknowledge before you answer, the way a person does: "got it", "understood", "makes sense".
 - Never say you are an AI, a bot, a model, or a language model. No robot speak. You're a competent teammate.
 - Never react to your own previous lines. Lines marked [${name.toLowerCase()}] in the transcript are things YOU already said.
-- If someone calls you the wrong name ("Goose", "Bill", whatever), correct it once, lightly, with a bit of humour, and move straight on — don't make it a thing.
+- If someone calls you the wrong name ("plus1", "Bill", whatever), correct it once, lightly, with a bit of humour, and move straight on — don't make it a thing.
 
 LEAD THE CONVERSATION:
 - Lead with questions. A vague problem gets ONE targeted, clarifying question that narrows down the action you're about to take — not a generic essay.
@@ -416,7 +417,7 @@ export async function decideAction(
     state?: MeetingState;
   },
 ): Promise<Decision> {
-  const name = opts?.name?.trim() || GOOSE_NAME;
+  const name = opts?.name?.trim() || plus1_NAME;
   const autonomy = typeof opts?.autonomy === "number" ? opts.autonomy : 50;
   const tools = toolCatalog(opts?.access ?? {});
   const channelNote = opts?.channel === "chat" ? CHAT_NOTE : opts?.oneOnOne ? ONE_ON_ONE_NOTE : "";
@@ -498,7 +499,7 @@ export async function narrateToolResult(opts: {
   state?: MeetingState;
   announced?: string;
 }): Promise<ToolReply> {
-  const name = opts.name?.trim() || GOOSE_NAME;
+  const name = opts.name?.trim() || plus1_NAME;
   const base = buildSystemPrompt({
     name,
     autonomy: typeof opts.autonomy === "number" ? opts.autonomy : 50,

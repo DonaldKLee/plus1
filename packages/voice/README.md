@@ -31,7 +31,7 @@ rig.speakText(plan.say);
 - Text is normalised before synthesis: markdown stripped, URLs become "the link" (spoken URLs are
   useless anyway, see HLD §5.4).
 - Default voice: Daniel (`onwK4e9ZLuTAKqWW03F9`), a steady British broadcaster. Settings in
-  `GOOSE_VOICE_SETTINGS`. Swap via `ELEVENLABS_VOICE_ID`.
+  `plus1_VOICE_SETTINGS`. Swap via `ELEVENLABS_VOICE_ID`.
 
 ## Scripts
 

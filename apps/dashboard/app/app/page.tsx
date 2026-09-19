@@ -8,7 +8,7 @@ export default function DashboardHome() {
     <>
       <PageHeader
         title="Home"
-        description="Paste a Meet link and send the goose in. It joins as a visible guest and transcribes the room live with Gemini."
+        description="Paste a Meet link and send the plus1 in. It joins as a visible guest and transcribes the room live with Gemini."
       />
 
       <PageBody>

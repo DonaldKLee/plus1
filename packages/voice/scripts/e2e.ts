@@ -1,5 +1,5 @@
 /**
- * Real ElevenLabs -> real LiveAvatar (sandbox): the goose says actual words with lipsync.
+ * Real ElevenLabs -> real LiveAvatar (sandbox): the plus1 says actual words with lipsync.
  * Watch it in the preview (npm run preview -w @plus1/liveavatar) for video; this prints timings.
  */
 import { LiveAvatarClient, LiveAvatarSession } from "@plus1/liveavatar";

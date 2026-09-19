@@ -1,5 +1,5 @@
 /**
- * Intact insurance, exposed to the goose as tools: conversational car + tenant
+ * Intact insurance, exposed to the plus1 as tools: conversational car + tenant
  * quoting. The rating engine is pure (@plus1/brain/intact); this wrapper coerces
  * the loose details the brain gathered into typed inputs and formats a friendly,
  * chat-ready quote.

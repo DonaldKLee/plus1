@@ -1,14 +1,14 @@
 /**
- * run_command: let the goose actually DO things on the machine (make a file,
+ * run_command: let the plus1 actually DO things on the machine (make a file,
  * convert something, open an app) the way an agentic coder does — but the
  * trigger is a live, sometimes-misheard voice transcript, so this is guarded:
  *   - only reachable when Local access is set to "Read & write" (upstream),
- *   - the goose must announce what it's doing first (executeDecision),
+ *   - the plus1 must announce what it's doing first (executeDecision),
  *   - a denylist blocks obviously destructive / dangerous commands,
  *   - every run has a timeout and a capped, captured output.
  *
  * It still runs with the user's own permissions — "bash access" means what it
- * says. Point GOOSE_SHELL_CWD at the directory you actually want it working in.
+ * says. Point plus1_SHELL_CWD at the directory you actually want it working in.
  */
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
@@ -33,7 +33,7 @@ const DENY: { re: RegExp; why: string }[] = [
 ];
 
 export function shellCwd(): string {
-  return process.env.GOOSE_SHELL_CWD || homedir();
+  return process.env.plus1_SHELL_CWD || homedir();
 }
 
 /** Run a shell command, returning a short human-readable result for the room. */

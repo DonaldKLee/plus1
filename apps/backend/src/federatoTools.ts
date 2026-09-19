@@ -1,5 +1,5 @@
 /**
- * Federato, exposed to the goose as tools it can call live in a meeting or chat:
+ * Federato, exposed to the plus1 as tools it can call live in a meeting or chat:
  *   - federato_appetite(query?) — the queue ranked by appetite (quote/refer/decline)
  *   - federato_account(query)   — deep-dive one account/policy: decision, why, red flags
  *

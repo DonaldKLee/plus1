@@ -8,7 +8,7 @@
    ships is declared here, so a brand palette lands by editing this block alone.
 
    Color has exactly two jobs:
-     - brand   → identity only (wordmark, goose, active nav)
+     - brand   → identity only (wordmark, plus1, active nav)
      - state   → one hue per meeting state, never decoration
    Everything else is the neutral ramp.
    ========================================================================== */
@@ -419,7 +419,7 @@ a {
   }
 }
 
-/* The goose notices. */
+/* The plus1 notices. */
 .shake {
   animation: shake 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97);
 }
@@ -462,9 +462,9 @@ a {
   display: grid;
   gap: 12px;
   grid-template-columns: 1fr;
-  grid-template-areas: "goose" "transcript" "mind" "artifacts";
+  grid-template-areas: "plus1" "transcript" "mind" "artifacts";
 }
-.area-goose { grid-area: goose; }
+.area-plus1 { grid-area: plus1; }
 .area-transcript { grid-area: transcript; min-height: 60vh; }
 .area-mind { grid-area: mind; min-height: 70vh; }
 .area-artifacts { grid-area: artifacts; min-height: 50vh; }
@@ -483,7 +483,7 @@ a {
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.22fr) minmax(0, 0.9fr);
     grid-template-rows: auto minmax(0, 1fr);
     grid-template-areas:
-      "transcript mind goose"
+      "transcript mind plus1"
       "transcript mind artifacts";
   }
   .area-transcript,

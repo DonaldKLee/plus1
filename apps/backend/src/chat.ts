@@ -1,5 +1,5 @@
 /**
- * Live chat with the goose — the same brain (decideAction) and the same tools
+ * Live chat with the plus1 — the same brain (decideAction) and the same tools
  * (executeTool) as a meeting, minus Chrome and the avatar. Two uses:
  *   - a fast harness to test tools and just talk to Bob, and
  *   - a broker asking Bob for help, where Bob can offer to hop on a meeting.
@@ -10,7 +10,7 @@ import {
   applyStateUpdate,
   decideAction,
   emptyState,
-  GOOSE_NAME,
+  plus1_NAME,
   narrateToolResult,
   recordCompletedAction,
   type MeetingState,
@@ -54,7 +54,7 @@ const chats = new Map<string, ChatSession>();
 
 // ── config → brain knobs (mirrors the meeting's mapping) ────────────────────
 function nameOf(c?: SessionConfig): string {
-  return c?.name?.trim() || GOOSE_NAME;
+  return c?.name?.trim() || plus1_NAME;
 }
 function autonomyOf(c?: SessionConfig): number {
   return typeof c?.autonomy === "number" ? c.autonomy : 50;
@@ -116,7 +116,7 @@ export async function sendChatMessage(
   const clean = text.trim();
   if (!clean) throw new Error("empty message");
 
-  // Always apply the latest config, so toggling tools in the Goose tab takes
+  // Always apply the latest config, so toggling tools in the plus1 tab takes
   // effect on the very next message — no reload, no stale session.
   if (config) c.config = { ...c.config, ...config };
 

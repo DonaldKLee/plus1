@@ -6,7 +6,7 @@ import {
   fmtClock,
   fmtMs,
 } from "./sample";
-import { GooseMark } from "@/components/ui";
+import { Plus1Mark } from "@/components/ui";
 
 /**
  * A still of the console, built from the frozen sample beside it.
@@ -20,7 +20,7 @@ export function ConsolePreview() {
     <div className="theme-dark overflow-hidden rounded-[var(--r-lg)] border border-border bg-bg text-fg">
       {/* console chrome */}
       <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-        <GooseMark size={18} className="text-fg" />
+        <Plus1Mark size={18} className="text-fg" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-medium text-fg">{SAMPLE_MEETING.meetTitle}</p>
           <p className="tnum truncate text-[11.5px] text-fg-subtle">

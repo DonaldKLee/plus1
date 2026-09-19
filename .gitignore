@@ -14,5 +14,5 @@ apps/backend/cache/
 *.tsbuildinfo
 apps/runner-profile/
 
-# Goose local file-access sandbox
-goose-files/
+# plus1 local file-access sandbox
+plus1-files/

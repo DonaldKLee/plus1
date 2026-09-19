@@ -1,3 +1,4 @@
+import "./plus1Config.js"; // load committed plus1 config + hydrate env before anything reads it
 import express from "express";
 import cors from "cors";
 import { envOptional } from "./env.js";
@@ -27,9 +28,9 @@ import {
 import { createChat, getChat, sendChatMessage, updateChatConfig } from "./chat.js";
 import {
   deleteMeeting,
-  getGooseSettings,
+  getplus1Settings,
   meetingStats,
-  saveGooseSettings,
+  saveplus1Settings,
   searchMeetings,
   storeEnabled,
 } from "./store.js";
@@ -151,7 +152,7 @@ app.post("/api/federato/present-meet", async (req, res) => {
   }
 });
 
-// ── Send a goose: join a Meet and transcribe it live ──────────────────────
+// ── Send a plus1: join a Meet and transcribe it live ──────────────────────
 const MEET_RE = /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\?.*)?$/i;
 
 app.post("/api/meet/join", (req, res) => {
@@ -236,8 +237,8 @@ app.get("/api/meet/sessions/:id/stream", (req, res) => {
   }
 });
 
-// ── The goose speaks: control-plane → runner commands (HLD §10), per session ──
-function gooseRoute(handler: (id: string, body: any) => unknown | Promise<unknown>) {
+// ── The plus1 speaks: control-plane → runner commands (HLD §10), per session ──
+function plus1Route(handler: (id: string, body: any) => unknown | Promise<unknown>) {
   return async (req: express.Request, res: express.Response) => {
     try {
       const out = await handler(String(req.params.id), req.body ?? {});
@@ -248,38 +249,38 @@ function gooseRoute(handler: (id: string, body: any) => unknown | Promise<unknow
     }
   };
 }
-app.post("/api/meet/sessions/:id/speak", gooseRoute((id, b) => {
+app.post("/api/meet/sessions/:id/speak", plus1Route((id, b) => {
   if (typeof b.text !== "string" || !b.text.trim()) throw new Error("text required");
   return speakInSession(id, b.text);
 }));
-app.post("/api/meet/sessions/:id/filler", gooseRoute((id, b) => fillerInSession(id, b.kind ?? "ack") ?? { error: "no fillers cached" }));
-app.post("/api/meet/sessions/:id/interrupt", gooseRoute((id) => { interruptSession(id); }));
-app.post("/api/meet/sessions/:id/honk", gooseRoute((id) => honkSession(id)));
-app.post("/api/meet/sessions/:id/emote", gooseRoute((id, b) => emoteSession(id, b.emote ?? "idle")));
-app.post("/api/meet/sessions/:id/config", gooseRoute((id, b) => {
+app.post("/api/meet/sessions/:id/filler", plus1Route((id, b) => fillerInSession(id, b.kind ?? "ack") ?? { error: "no fillers cached" }));
+app.post("/api/meet/sessions/:id/interrupt", plus1Route((id) => { interruptSession(id); }));
+app.post("/api/meet/sessions/:id/honk", plus1Route((id) => honkSession(id)));
+app.post("/api/meet/sessions/:id/emote", plus1Route((id, b) => emoteSession(id, b.emote ?? "idle")));
+app.post("/api/meet/sessions/:id/config", plus1Route((id, b) => {
   const config = b?.config && typeof b.config === "object" ? b.config : b;
   const ok = updateSessionConfig(id, config ?? {});
   if (!ok) throw new Error("No such session");
   return { ok: true };
 }));
 
-// ── Goose settings, stored in MongoDB so they follow the goose ─────────────
-app.get("/api/goose/config", async (_req, res) => {
+// ── plus1 settings, stored in MongoDB so they follow the plus1 ─────────────
+app.get("/api/plus1/config", async (_req, res) => {
   try {
-    res.json({ config: await getGooseSettings(), store: storeEnabled() ? "mongodb" : "memory" });
+    res.json({ config: await getplus1Settings(), store: storeEnabled() ? "mongodb" : "memory" });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
 });
 
-app.put("/api/goose/config", async (req, res) => {
+app.put("/api/plus1/config", async (req, res) => {
   const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : req.body;
   if (!config || typeof config !== "object") {
     res.status(400).json({ error: "Expected a config object" });
     return;
   }
   try {
-    const saved = await saveGooseSettings(config as Record<string, unknown>);
+    const saved = await saveplus1Settings(config as Record<string, unknown>);
     // No database configured is not an error: the tab keeps its local copy.
     res.json({ ok: true, saved, store: storeEnabled() ? "mongodb" : "memory" });
   } catch (e) {
@@ -287,7 +288,7 @@ app.put("/api/goose/config", async (req, res) => {
   }
 });
 
-// ── Live chat with the goose (no meeting) ───────────────────────────────────
+// ── Live chat with the plus1 (no meeting) ───────────────────────────────────
 app.post("/api/chat/sessions", (req, res) => {
   const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : undefined;
   res.json(createChat(config));

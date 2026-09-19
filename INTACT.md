@@ -1,7 +1,7 @@
 # plus1 × Intact — insurance you get by talking
 
 A conversational way to get **car and tenant insurance** quotes: instead of a multi-page
-web form, you just talk to **Bob** (our AI goose). Bob asks only what's needed, one thing at a
+web form, you just talk to **Bob** (our AI plus1). Bob asks only what's needed, one thing at a
 time, explains any jargon, returns a transparent estimate with coverage recommendations, and —
 when it gets complex or you'd rather talk to a person — offers to **hop onto a Google Meet call**
 with a broker. The consumer chat funnels straight into the human channel.
@@ -78,6 +78,6 @@ so quotes are consistent and explainable. The AI runs the conversation; the math
 
 ## Running it
 
-The Intact tools live behind the **Intact** toggle in the dashboard's **Goose** tab. Turn it on,
+The Intact tools live behind the **Intact** toggle in the dashboard's **plus1** tab. Turn it on,
 open **Chat**, and talk to Bob. Backend + engine details are in the repo's `CLAUDE.md` and
 `apps/backend/src/intactTools.ts`; the pure engine is `packages/brain/src/intact/quote.ts`.

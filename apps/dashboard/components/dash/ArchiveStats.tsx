@@ -33,11 +33,16 @@ export function ArchiveStats() {
 
   if (!stats || stats.meetings === 0) return null;
 
+  // Defensive: tolerate an older/newer backend that omits a field or still uses
+  // the pre-rename name, so a missing stat never crashes the page.
+  const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const plus1Lines = n(stats.plus1Lines ?? (stats as { gooseLines?: number }).gooseLines);
+
   const items: [string, string][] = [
-    ["Meetings archived", String(stats.meetings)],
-    ["Lines transcribed", stats.lines.toLocaleString()],
-    ["Spoken by the goose", stats.gooseLines.toLocaleString()],
-    ["Time in rooms", fmtHours(stats.totalDurationMs)],
+    ["Meetings archived", String(n(stats.meetings))],
+    ["Lines transcribed", n(stats.lines).toLocaleString()],
+    ["Spoken by the plus1", plus1Lines.toLocaleString()],
+    ["Time in rooms", fmtHours(n(stats.totalDurationMs))],
   ];
 
   return (

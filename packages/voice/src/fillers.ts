@@ -66,7 +66,7 @@ export class FillerCache {
   /** Exact phrase lookup. */
   get(phrase: string): Uint8Array | undefined { return this.pcm.get(phrase); }
 
-  /** Next filler of a kind, rotating so the goose doesn't repeat itself back-to-back. */
+  /** Next filler of a kind, rotating so the plus1 doesn't repeat itself back-to-back. */
   pick(kind: FillerKind): { phrase: string; pcm: Uint8Array } | undefined {
     const list = this.phrases[kind].filter((p) => this.pcm.has(p));
     if (list.length === 0) return undefined;

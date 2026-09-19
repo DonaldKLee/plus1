@@ -112,7 +112,7 @@ export function JoinMeeting() {
             disabled={busy}
             className="w-full lg:w-auto"
           >
-            {busy ? "Sending the goose…" : "Send the goose"}
+            {busy ? "Sending the plus1…" : "Send the plus1"}
           </Button>
         </div>
 
@@ -129,7 +129,7 @@ export function JoinMeeting() {
         )}
 
         <p className="mt-3 text-[12.5px] leading-snug text-fg-subtle">
-          The goose joins as a visible guest in a local Chrome window, then
+          The plus1 joins as a visible guest in a local Chrome window, then
           transcribes the room with Gemini. Lines stream in below as people
           speak.
         </p>

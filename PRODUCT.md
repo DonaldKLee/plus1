@@ -4,7 +4,7 @@
 
 ## One sentence
 
-plus1 is a 3D goose in a business suit that joins your video meeting as a visible guest —
+plus1 is a 3D plus1 in a business suit that joins your video meeting as a visible guest —
 it hears the room in real time with speaker attribution, answers out loud when addressed,
 and does the work (drafts the email, reviews the pasted doc, resolves contradictions across
 your corpus) while the meeting is still happening.
@@ -27,8 +27,8 @@ system at a glance.
 
 ## Positioning
 
-The name is the pitch: a **plus one**, not a replacement. Clearly artificial (it's a goose),
-doing real work beside you. The absurdity of the goose is deliberate design — it dodges the
+The name is the pitch: a **plus one**, not a replacement. Clearly artificial (it's a plus1),
+doing real work beside you. The absurdity of the plus1 is deliberate design — it dodges the
 uncanny valley and makes the AI's presence unmistakable.
 
 ## Core behaviors (product truth the UI must reflect)

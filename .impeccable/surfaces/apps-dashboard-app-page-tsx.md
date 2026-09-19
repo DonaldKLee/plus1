@@ -35,12 +35,12 @@ timeline, not the card grid, is the page's structural spine.
 
 OWN-WORLD: Notion/Stripe canon executed straight — white ground (`#ffffff`), near-black display
 type (`#0a0a0b`) in Geist 600 at tight tracking, hairline `#e6e6e9` rules, generous vertical air.
-One brand hue, goose-beak amber `#FFB224`, carries identity only: the mark, the live pulse, the
+One brand hue, plus1-beak amber `#FFB224`, carries identity only: the mark, the live pulse, the
 map nodes. Four state hues carry meaning and nothing else — emerald heard, violet reasoning, sky
 acting, rose honk. Geist Mono sets timestamps, gate verdicts, and latency. No gradient text, no
 glass, no icon tiles.
 
-STORY: A visitor understands within one viewport that a goose joins the call as a guest; believes
+STORY: A visitor understands within one viewport that a plus1 joins the call as a guest; believes
 it because the gate classification and sub-200ms latency are shown as instrument readings rather
 than asserted; and clicks into the console to watch a real meeting replay.
 

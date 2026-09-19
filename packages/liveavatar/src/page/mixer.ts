@@ -53,7 +53,7 @@ export class Mixer {
     el.autoplay = true;
     el.setAttribute("playsinline", "");
     el.style.display = "none";
-    el.dataset.plus1Avatar = "1"; // lets the room audio tap skip the goose's own playback
+    el.dataset.plus1Avatar = "1"; // lets the room audio tap skip the plus1's own playback
     el.volume = Math.max(0, Math.min(1, this.monitorVolume));
     el.srcObject = stream;
     document.documentElement.appendChild(el);
@@ -107,7 +107,7 @@ export class Mixer {
   }
 
   /**
-   * A goose honk, synthesised: a sawtooth with a falling pitch, pushed through
+   * A plus1 honk, synthesised: a sawtooth with a falling pitch, pushed through
    * a nasal bandpass, with a fast tremolo and a hard stop. Roughly 650 ms.
    */
   async honk(opts: { durationMs?: number; duck?: boolean } = {}): Promise<void> {

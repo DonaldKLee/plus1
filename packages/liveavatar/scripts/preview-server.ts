@@ -4,7 +4,7 @@
  *
  *   LIVEAVATAR_API_KEY=… npm run preview      → http://localhost:4173
  *
- * This is HLD §12 step 6 ("build the goose page standalone first"): iterate on
+ * This is HLD §12 step 6 ("build the plus1 page standalone first"): iterate on
  * the media bridge here, then the exact same bundle goes into the Meet tab.
  */
 import { loadEnv } from "../src/env.js";

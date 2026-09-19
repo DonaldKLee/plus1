@@ -41,7 +41,7 @@ const r = await page.evaluate(async () => {
   const snap = b.snapshot();
   out.snapshotLen = snap.length;
   // sample the canvas center pixel: placeholder should not be pure black
-  const c = window.__gooseCanvas; const px = c.getContext("2d").getImageData(640, 300, 1, 1).data;
+  const c = window.__plus1Canvas; const px = c.getContext("2d").getImageData(640, 300, 1, 1).data;
   out.centerPixel = Array.from(px);
   out.audioCtxState = window.__audioCtx.state;
   const t0 = performance.now(); await b.honk({ durationMs: 300 }); out.honkMs = Math.round(performance.now() - t0);

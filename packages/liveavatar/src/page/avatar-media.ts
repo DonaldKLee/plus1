@@ -119,7 +119,7 @@ export class AvatarMedia {
     if (track.kind === Track.Kind.Video) {
       const el = document.createElement("video");
       el.muted = true; el.autoplay = true; el.playsInline = true;
-      el.dataset.plus1Avatar = "1"; // lets the room audio tap skip the goose's own playback
+      el.dataset.plus1Avatar = "1"; // lets the room audio tap skip the plus1's own playback
       el.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-10px;top:-10px";
       track.attach(el);
       document.documentElement.appendChild(el);

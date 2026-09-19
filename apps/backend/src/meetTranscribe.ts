@@ -20,6 +20,7 @@ import { FillerCache, voiceFromEnv, type ElevenLabsTts, type FillerKind } from "
 import { env, envOptional } from "./env.js";
 import { joinMeet, launchMeetChrome } from "./meetPresent.js";
 import { GOOSE_NAME, decideAction, postToMeetChat, runTool, type Decision } from "./agentBrain.js";
+import { getMeeting, listMeetings, saveMeeting, storeEnabled } from "./store.js";
 
 /** Ignore transcription fragments this soon after the goose stopped: they're often its own tail. */
 const BARGE_IN_GUARD_MS = 400;
@@ -146,6 +147,49 @@ function autonomyOf(s: Session): number {
 
 const sessions = new Map<string, Session>();
 
+// ── MongoDB mirror ────────────────────────────────────────────────────────
+// Live state stays in the Map above; every meaningful change is flushed to
+// Atlas (debounced, so a chatty transcript is one write per second, not one
+// per fragment). Storage failures are logged and never touch the meeting.
+const PERSIST_DEBOUNCE_MS = 1000;
+const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** Snapshot a session as the document shape the store writes. */
+function toDoc(s: Session) {
+  const endedAt = s.status === "ended" || s.status === "error" ? new Date().toISOString() : undefined;
+  return {
+    _id: s.id,
+    meetUrl: s.meetUrl,
+    status: s.status,
+    createdAt: s.createdAt,
+    endedAt,
+    durationMs: s.startedAt ? Date.now() - s.startedAt : undefined,
+    error: s.error,
+    notes: s.notes,
+    // Only settled lines are worth storing; partials are rewritten constantly.
+    lines: s.lines
+      .filter((l) => !l.partial && l.text.trim())
+      .map((l) => ({ id: l.id, t: l.t, at: l.at, text: l.text, agent: l.agent, speaker: l.speaker })),
+    decisions: s.decisions,
+  };
+}
+
+/** Queue a flush to Mongo. `now` skips the debounce (session start / end). */
+function persist(s: Session, now = false): void {
+  if (!storeEnabled()) return;
+  const existing = persistTimers.get(s.id);
+  if (existing) clearTimeout(existing);
+  const flush = () => {
+    persistTimers.delete(s.id);
+    void saveMeeting(toDoc(s));
+  };
+  if (now) {
+    flush();
+    return;
+  }
+  persistTimers.set(s.id, setTimeout(flush, PERSIST_DEBOUNCE_MS));
+}
+
 function emit(s: Session, event: string, data: unknown): void {
   s.bus.emit("event", { event, data });
 }
@@ -154,6 +198,7 @@ function setStatus(s: Session, status: SessionStatus, error?: string): void {
   s.status = status;
   if (error) s.error = error;
   emit(s, "status", { status, error, notes: s.notes });
+  persist(s, true);
 }
 
 /** Tear down the Live socket, gap timer, and Chrome window (flushing the profile). */
@@ -187,33 +232,67 @@ function note(s: Session, msg: string): void {
   s.notes.push(msg);
   console.log(`[goose ${s.id.slice(0, 8)}] ${msg}`);
   emit(s, "note", { msg });
+  persist(s);
 }
 
-export function listSessions() {
-  return [...sessions.values()]
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-    .map((s) => ({
-      id: s.id,
-      meetUrl: s.meetUrl,
-      status: s.status,
-      createdAt: s.createdAt,
-      error: s.error,
-      lineCount: s.lines.length,
-    }));
-}
-
-export function getSession(id: string) {
-  const s = sessions.get(id);
-  if (!s) return undefined;
+function summarize(s: Session) {
   return {
     id: s.id,
     meetUrl: s.meetUrl,
     status: s.status,
     createdAt: s.createdAt,
+    durationMs: s.startedAt ? Date.now() - s.startedAt : undefined,
     error: s.error,
-    notes: s.notes,
-    lines: s.lines,
-    decisions: s.decisions,
+    lineCount: s.lines.length,
+    live: true as const,
+  };
+}
+
+/**
+ * Every meeting the dashboard should see: the ones running in this process
+ * plus everything Atlas remembers from previous runs. In-memory wins on id
+ * collision, since it is the fresher copy.
+ */
+export async function listSessions() {
+  const live = [...sessions.values()].map(summarize);
+  const stored = await listMeetings();
+  const liveIds = new Set(live.map((s) => s.id));
+  const merged = [
+    ...live,
+    ...stored.filter((d) => !liveIds.has(d.id)).map((d) => ({ ...d, live: false as const })),
+  ];
+  return merged.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+}
+
+export async function getSession(id: string) {
+  const s = sessions.get(id);
+  if (s) {
+    return {
+      id: s.id,
+      meetUrl: s.meetUrl,
+      status: s.status,
+      createdAt: s.createdAt,
+      error: s.error,
+      notes: s.notes,
+      lines: s.lines,
+      decisions: s.decisions,
+      live: true,
+    };
+  }
+  const doc = await getMeeting(id);
+  if (!doc) return undefined;
+  return {
+    id: doc._id,
+    meetUrl: doc.meetUrl,
+    status: doc.status,
+    createdAt: doc.createdAt,
+    endedAt: doc.endedAt,
+    durationMs: doc.durationMs,
+    error: doc.error,
+    notes: doc.notes ?? [],
+    lines: doc.lines ?? [],
+    decisions: doc.decisions ?? [],
+    live: false,
   };
 }
 
@@ -264,6 +343,7 @@ export function startMeetTranscription(meetUrl: string, config?: SessionConfig):
   };
   session.bus.setMaxListeners(50);
   sessions.set(id, session);
+  persist(session, true);
 
   void runSession(session).catch(async (e) => {
     note(session, `crashed: ${(e as Error).message}`);
@@ -446,6 +526,7 @@ function finalizeLine(s: Session): void {
   if (!line) return;
   line.partial = false;
   emit(s, "line", line);
+  persist(s);
   if (!line.agent) scheduleBrain(s);
 }
 
@@ -541,11 +622,13 @@ async function runBrain(s: Session): Promise<void> {
       s.lastActionAt = Date.now();
       record.outcome = await executeDecision(s, decision);
       emit(s, "decision", record); // update with the real outcome
+      persist(s);
     } else {
       // Still surface the reasoning so the operator sees the goose thinking.
       record.outcome = decision.action === "none" ? "held" : "below threshold";
       s.decisions.push(record);
       emit(s, "decision", record);
+      persist(s);
     }
   } catch (e) {
     const err = e as Error & { transient?: boolean; quota?: boolean };
@@ -666,6 +749,7 @@ function gooseLine(s: Session, text: string, done: Promise<{ outcome: string }>)
     line.partial = false;
     if (r.outcome === "interrupted") line.text = `${text} …`;
     emit(s, "line", line);
+    persist(s);
   });
 }
 

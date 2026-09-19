@@ -22,6 +22,7 @@ import {
   stopSession,
   subscribe,
 } from "./meetTranscribe.js";
+import { deleteMeeting, meetingStats, searchMeetings, storeEnabled } from "./store.js";
 
 const app = express();
 const configuredOrigin = envOptional("DASHBOARD_ORIGIN") ?? "http://localhost:3000";
@@ -50,7 +51,7 @@ app.use(
 app.use(express.json());
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "backend" });
+  res.json({ ok: true, service: "backend", store: storeEnabled() ? "mongodb" : "memory" });
 });
 
 app.post("/api/federato/cache", async (_req, res) => {
@@ -156,17 +157,49 @@ app.post("/api/meet/join", (req, res) => {
   res.json({ sessionId });
 });
 
-app.get("/api/meet/sessions", (_req, res) => {
-  res.json({ sessions: listSessions() });
+app.get("/api/meet/sessions", async (_req, res) => {
+  try {
+    res.json({ sessions: await listSessions(), store: storeEnabled() ? "mongodb" : "memory" });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
 });
 
-app.get("/api/meet/sessions/:id", (req, res) => {
-  const session = getSession(req.params.id);
-  if (!session) {
-    res.status(404).json({ error: "No such session" });
-    return;
+// Full-text search across every transcript stored in Atlas.
+app.get("/api/meet/search", async (req, res) => {
+  try {
+    const q = typeof req.query.q === "string" ? req.query.q : "";
+    res.json({ results: await searchMeetings(q) });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
   }
-  res.json({ session });
+});
+
+app.get("/api/meet/stats", async (_req, res) => {
+  try {
+    res.json({ stats: await meetingStats() });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+app.get("/api/meet/sessions/:id", async (req, res) => {
+  try {
+    const session = await getSession(req.params.id);
+    if (!session) {
+      res.status(404).json({ error: "No such session" });
+      return;
+    }
+    res.json({ session });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+app.delete("/api/meet/sessions/:id", async (req, res) => {
+  await stopSession(req.params.id);
+  const removed = await deleteMeeting(req.params.id);
+  res.json({ ok: true, removed });
 });
 
 app.get("/api/meet/sessions/:id/stream", (req, res) => {

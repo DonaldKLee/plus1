@@ -11,11 +11,13 @@
 ```
 apps/dashboard/        Next.js — setup, integrations, live console, **UW tab**
 apps/federato-agent/   Federato API + Browserbase work browser + screenshare helper
-apps/runner/           Node + Playwright — Meet, fake media (not yet / teammate)
+apps/runner/           Node + Playwright — joins Meet as the goose (LiveAvatar camera/mic), captions, barge-in, control API :8790
 workers/               Hono API + MeetingSession DO (not yet)
 packages/brain         gate/planner + **federato appetite + query plan** (pure)
 packages/protocol      shared zod/types for runner + Federato pack
 fixtures/              transcript-demo.json
+packages/liveavatar    HeyGen LiveAvatar LITE: session, PCM pump, in-page camera/mic bridge (built, tested live)
+packages/voice         ElevenLabs streaming TTS -> PCM 24 kHz + cached fillers (built)
 ```
 
 ## Federato pack (feat/federato-browserbase)
@@ -44,6 +46,18 @@ profile (`npm run google-login` in `apps/federato-agent`, or just sign in when t
 
 All prior fixture/dummy data (personas, integrations, replay demo) has been removed; the dashboard
 is Home / Meetings / Underwrite only.
+
+## The goose on camera (merged into the same session)
+
+The transcription session above *is* the goose: `packages/liveavatar` puts a HeyGen LiveAvatar
+(LITE mode: we push PCM 24 kHz, it streams lipsynced video into a LiveKit room) onto the fake
+camera and mic of that same Chrome tab, and `packages/voice` turns text into PCM with ElevenLabs.
+The agent exposes `POST /api/meet/sessions/:id/{speak,filler,interrupt,honk,emote}` and streams
+`avatar`/`speaking` SSE events; the live meeting page has the controls. Barge-in is mechanical:
+a room transcription fragment while the goose is speaking interrupts it. The room audio tap skips
+elements marked `data-plus1-avatar` so the goose doesn't transcribe itself. `LIVEAVATAR_SANDBOX=1`
+sessions die after ~60 s (auto-restarted, video freezes briefly); use `0` for real demos.
+Read `packages/liveavatar/README.md` before touching the media path.
 
 ## Running it
 

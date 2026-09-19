@@ -4,30 +4,31 @@
  * (a persistent WebSocket) for real-time transcription. Lines stream to the
  * dashboard over SSE (see server.ts), updating live as each person speaks.
  *
- * The runner makes no decisions — this only joins, captures, transcribes.
+ * The same session is also the goose on camera: a HeyGen LiveAvatar (packages/liveavatar) is
+ * the tab's fake camera + mic, voiced by ElevenLabs (packages/voice). The brain (agentBrain.ts)
+ * decides; the rig speaks. A room transcription fragment while the goose is talking interrupts
+ * it (barge-in, HLD §5.5). The room audio tap skips the avatar's own playback elements
+ * (data-plus1-avatar) so the goose never transcribes itself.
  */
 
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { Response } from "express";
 import type { BrowserContext, Page } from "playwright-core";
-import { env } from "./env.js";
+import { AvatarRig, LiveAvatarClient, type Emote } from "@plus1/liveavatar";
+import { FillerCache, voiceFromEnv, type ElevenLabsTts, type FillerKind } from "@plus1/voice";
+import { env, envOptional } from "./env.js";
 import { joinMeet, launchMeetChrome } from "./meetPresent.js";
-import {
-  decideAction,
-  elevenLabsConfigured,
-  postToMeetChat,
-  runTool,
-  speakIntoMeet,
-  type Decision,
-} from "./agentBrain.js";
+import { GOOSE_NAME, decideAction, postToMeetChat, runTool, type Decision } from "./agentBrain.js";
+
+/** Ignore transcription fragments this soon after the goose stopped: they're often its own tail. */
+const BARGE_IN_GUARD_MS = 400;
 
 // Auto-act tuning.
 const CONFIDENCE_THRESHOLD = Number(process.env.BRAIN_CONFIDENCE ?? 0.7);
 const ACTION_COOLDOWN_MS = 9000; // min gap between the goose acting
 const BRAIN_DEBOUNCE_MS = 700; // wait for the line to settle before deciding
 const BRAIN_MIN_INTERVAL_MS = 4000; // cap how often we call Gemini to read the room
-const SPEAK_TAIL_MS = 1500; // ignore transcript for a bit after we speak
 
 // esbuild (via tsx) rewrites `function foo(){}` as `__name(function foo(){}, "foo")`.
 // That helper lives in the Node module, not the page, so any function we inject
@@ -68,7 +69,14 @@ export interface TranscriptLine {
   at: string; // ISO wall clock
   text: string;
   partial?: boolean; // true while the line is still being spoken
-  agent?: boolean; // the goose's own voice, heard back through the mic loop
+  agent?: boolean; // a line the goose spoke (via the avatar)
+  speaker?: string; // the goose's name on its own lines
+}
+
+export interface AvatarStatus {
+  session: string; // LiveAvatar session state
+  media: string; // in-page media state (what Meet sees)
+  speaking: boolean;
 }
 
 export interface DecisionRecord extends Decision {
@@ -101,7 +109,12 @@ interface Session {
   lastBrainAt?: number;
   lastActionAt?: number;
   quotaNotedAt?: number;
-  speakingUntil?: number; // ignore transcript + brain while we're talking
+  // ── the goose on camera ──
+  rig?: AvatarRig;
+  tts?: ElevenLabsTts;
+  fillers?: FillerCache;
+  avatar: AvatarStatus;
+  lastSpeechEndedAt: number;
 }
 
 const sessions = new Map<string, Session>();
@@ -127,6 +140,10 @@ async function closeContext(s: Session): Promise<void> {
   }
   s.live = undefined;
   s.liveReady = false;
+
+  const rig = s.rig;
+  s.rig = undefined;
+  if (rig) await rig.stop().catch(() => {});
 
   const ctx = s.context;
   s.context = undefined;
@@ -187,6 +204,7 @@ export function subscribe(id: string, res: Response): boolean {
   write("status", { status: s.status, error: s.error, notes: s.notes });
   for (const line of s.lines) write("line", line);
   for (const d of s.decisions) write("decision", d);
+  write("avatar", s.avatar);
 
   const onEvent = (msg: { event: string; data: unknown }) => {
     write(msg.event, msg.data);
@@ -213,6 +231,8 @@ export function startMeetTranscription(meetUrl: string): { sessionId: string } {
     lines: [],
     decisions: [],
     bus: new EventEmitter(),
+    avatar: { session: "idle", media: "idle", speaking: false },
+    lastSpeechEndedAt: 0,
   };
   session.bus.setMaxListeners(50);
   sessions.set(id, session);
@@ -257,22 +277,35 @@ async function runSession(s: Session): Promise<void> {
 
   const page = context.pages()[0] ?? (await context.newPage());
   s.page = page;
-  await page.goto(s.meetUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+
+  // The goose's face and voice. Must be prepared BEFORE navigating: the (tiny) init script
+  // replaces getUserMedia so the camera/mic Meet acquires are the avatar canvas and mixer.
+  const rig = await prepareAvatar(s, page);
+
+  // Meet under automation doesn't always fire DOMContentLoaded for Playwright; commit is enough,
+  // joinMeet waits for the elements it needs.
+  await page.goto(s.meetUrl, { waitUntil: "commit", timeout: 30_000 }).catch((e) => note(s, `goto: ${(e as Error).message.split("\n")[0]} (continuing)`));
   note(s, `Opened Meet ${s.meetUrl}`);
   setStatus(s, "joining");
 
-  const joined = await joinMeet(page, s.notes, { muted: false });
+  // Start the avatar while the prejoin screen is up so the camera preview already shows it.
+  const avatarUp = rig
+    ? rig.start().then(() => note(s, "Avatar is live on the camera.")).catch((e) => note(s, `Avatar failed to start: ${(e as Error).message}`))
+    : Promise.resolve();
+
+  const joined = await joinMeet(page, s.notes, { muted: false, camera: rig ? "on" : "off", displayName: `${GOOSE_NAME} (plus1 AI)` });
   if (!joined) {
     setStatus(s, "error", s.notes[s.notes.length - 1] ?? "Could not join the meeting.");
     await closeContext(s); // quit the Chrome window if we couldn't get in
     return;
   }
   note(s, "Joined the meeting.");
+  await avatarUp;
+  // Meet reloads the tab after sign-in and on some errors; re-plumb the avatar when that happens.
+  page.on("load", () => void rig?.reattach());
 
   s.startedAt = Date.now();
-  if (!elevenLabsConfigured()) {
-    note(s, "No ELEVENLABS_API_KEY set — the goose can chat and use tools, but can't speak aloud yet.");
-  }
+  if (!rig) note(s, "No LIVEAVATAR_API_KEY — the goose can chat and use tools, but has no face or voice.");
   openLive(s);
   await startAudioCapture(page, s);
   setStatus(s, "listening");
@@ -346,6 +379,12 @@ async function handleLiveMessage(s: Session, data: unknown): Promise<void> {
 function appendFragment(s: Session, frag: string): void {
   if (s.gapTimer) clearTimeout(s.gapTimer);
 
+  // Barge-in: a human is talking while the goose speaks → cut the goose off (mechanical, no decision).
+  if (s.rig?.isSpeaking && Date.now() - s.lastSpeechEndedAt > BARGE_IN_GUARD_MS && frag.trim()) {
+    s.rig.interrupt();
+    note(s, `Barge-in: someone spoke over the goose ("${frag.trim().slice(0, 40)}").`);
+  }
+
   let line = s.currentLineId
     ? s.lines.find((l) => l.id === s.currentLineId)
     : undefined;
@@ -378,12 +417,7 @@ function finalizeLine(s: Session): void {
   s.currentLineId = undefined;
   if (!line) return;
   line.partial = false;
-  // Words captured while (or just after) the goose spoke are its own voice
-  // looping back through the mic — mark them and don't let the brain react.
-  const speaking = s.speakingUntil ? Date.now() < s.speakingUntil + SPEAK_TAIL_MS : false;
-  if (speaking) line.agent = true;
   emit(s, "line", line);
-
   if (!line.agent) scheduleBrain(s);
 }
 
@@ -397,7 +431,7 @@ function scheduleBrain(s: Session): void {
 // Cheap local gate so we only spend a Gemini call when a line plausibly needs
 // the goose — a name mention, a question, or a request. Keeps us well within
 // free-tier daily quotas and makes the brain react to real triggers.
-const NAME_RE = /\bplus[\s-]?(one|1)\b/i;
+const NAME_RE = new RegExp(`\\bplus[\\s-]?(one|1)\\b|\\b${GOOSE_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
 const REQUEST_RE =
   /\b(can|could|would|will|please|draft|write|send|email|schedule|book|check|look\s?up|find|search|summar|remind|add|create|what('?s| is| are)|who('?s| is)|when|where|how|why|should we|do we)\b/i;
 
@@ -418,7 +452,7 @@ function transcriptWindow(s: Session, maxLines = 14): string {
 
 async function runBrain(s: Session): Promise<void> {
   if (s.status !== "listening" || s.brainBusy) return;
-  if (s.speakingUntil && Date.now() < s.speakingUntil) return;
+  if (s.rig?.isSpeaking) return; // barge-in will stop us if a human wants the floor; decide afterwards
   if (s.lastActionAt && Date.now() - s.lastActionAt < ACTION_COOLDOWN_MS) return;
   // Cap Gemini read frequency to stay within rate limits on busy meetings.
   if (s.lastBrainAt && Date.now() - s.lastBrainAt < BRAIN_MIN_INTERVAL_MS) return;
@@ -487,13 +521,24 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
   }
 
   if (d.action === "speak" && d.say) {
+    if (!s.rig?.isSpeaking && s.rig && s.fillers && d.say.length > 80) {
+      // Long answer: say "one sec" instantly while TTS spins up (HLD §7).
+      const f = s.fillers.pick("checking");
+      if (f) { const fu = s.rig.speakPcm(f.pcm, { label: f.phrase }); gooseLine(s, f.phrase, fu.done); await fu.done; }
+    }
     note(s, `Speaking: "${d.say}"`);
-    // Reserve a speaking window so we ignore our own voice in the transcript.
-    s.speakingUntil = Date.now() + estimateSpeechMs(d.say);
-    const res = await speakIntoMeet(page, d.say);
-    s.speakingUntil = Date.now() + 800; // small tail after playback finishes
-    note(s, res.note);
-    return res.ok ? (res.routedIntoMeet ? "spoke into meeting" : "spoke locally") : `speak failed: ${res.note}`;
+    if (!s.rig) {
+      const ok = await postToMeetChat(page, `${GOOSE_NAME}: ${d.say}`);
+      return ok ? "no avatar; posted to chat instead" : "no avatar and chat failed";
+    }
+    try {
+      const u = s.rig.speakText(d.say);
+      gooseLine(s, d.say, u.done);
+      const r = await u.done;
+      return r.outcome === "completed" ? "spoke in the meeting" : r.outcome === "interrupted" ? "interrupted by a human" : `speak ${r.outcome}: ${r.error?.message ?? ""}`;
+    } catch (e) {
+      return `speak failed: ${(e as Error).message}`;
+    }
   }
 
   if (d.action === "tool" && d.tool?.name) {
@@ -508,9 +553,107 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
   return "nothing to do";
 }
 
-function estimateSpeechMs(text: string): number {
-  // ~15 characters per second of speech, min 2s.
-  return Math.max(2000, Math.ceil(text.length / 15) * 1000);
+// ── The goose on camera (LiveAvatar + ElevenLabs) ─────────────────────────
+
+function emitAvatar(s: Session): void {
+  emit(s, "avatar", s.avatar);
+}
+
+/** Build the rig if LIVEAVATAR_API_KEY is set; otherwise the session is transcription + chat only. */
+async function prepareAvatar(s: Session, page: Page): Promise<AvatarRig | undefined> {
+  const apiKey = envOptional("LIVEAVATAR_API_KEY");
+  const avatarId = envOptional("LIVEAVATAR_AVATAR_ID");
+  if (!apiKey || !avatarId) return undefined;
+  let tts: ElevenLabsTts | undefined;
+  try {
+    tts = voiceFromEnv();
+    s.tts = tts;
+    s.fillers = new FillerCache({ tts, voiceKey: `${tts.voiceId}:${tts.model}` });
+    const warmed = await s.fillers.warm();
+    note(s, `Voice ready (${warmed.loaded} fillers cached, ${warmed.synthesized} synthesized).`);
+  } catch (e) {
+    note(s, `ElevenLabs not configured (${(e as Error).message}); the goose has a face but no voice.`);
+  }
+  const rig = new AvatarRig({
+    client: new LiveAvatarClient({ apiKey }),
+    avatarId,
+    sandbox: envOptional("LIVEAVATAR_SANDBOX") !== "0",
+    tts,
+    page: { label: GOOSE_NAME },
+  });
+  rig.on("sessionState", (st) => { s.avatar.session = st; emitAvatar(s); });
+  rig.on("mediaState", (st) => { s.avatar.media = st; emitAvatar(s); });
+  rig.on("speaking", (e) => {
+    if (e.phase === "started") { s.avatar.speaking = true; emitAvatar(s); }
+    if (e.phase === "ended") { s.avatar.speaking = false; s.lastSpeechEndedAt = Date.now(); emitAvatar(s); }
+  });
+  rig.on("warning", (w) => console.log(`[goose ${s.id.slice(0, 8)}] avatar warning: ${w}`));
+  rig.on("error", (e) => console.log(`[goose ${s.id.slice(0, 8)}] avatar error: ${e.message}`));
+  rig.on("dead", (e) => note(s, `Avatar gave up restarting: ${e.message}`));
+  s.rig = rig;
+  await rig.prepare(page);
+  return rig;
+}
+
+/** A transcript line for something the goose said, updated as it plays. */
+function gooseLine(s: Session, text: string, done: Promise<{ outcome: string }>): void {
+  const line: TranscriptLine = {
+    id: randomUUID(),
+    t: s.startedAt ? Date.now() - s.startedAt : 0,
+    at: new Date().toISOString(),
+    text,
+    partial: true,
+    agent: true,
+    speaker: GOOSE_NAME,
+  };
+  s.lines.push(line);
+  emit(s, "line", line);
+  void done.then((r) => {
+    line.partial = false;
+    if (r.outcome === "interrupted") line.text = `${text} …`;
+    emit(s, "line", line);
+  });
+}
+
+function requireRig(id: string): { s: Session; rig: AvatarRig } {
+  const s = sessions.get(id);
+  if (!s) throw new Error("No such session");
+  if (!s.rig) throw new Error("This session has no avatar (LIVEAVATAR_API_KEY not set)");
+  return { s, rig: s.rig };
+}
+
+/** agent.speak from the operator/dashboard: text → ElevenLabs → avatar. Preempts whatever is playing. */
+export function speakInSession(id: string, text: string): { id: string } {
+  const { s, rig } = requireRig(id);
+  const u = rig.speakText(text);
+  gooseLine(s, text, u.done);
+  return { id: u.id };
+}
+
+/** Instant cached filler while the planner (or the operator) thinks. */
+export function fillerInSession(id: string, kind: FillerKind = "ack"): { id: string; phrase: string } | null {
+  const { s, rig } = requireRig(id);
+  const f = s.fillers?.pick(kind);
+  if (!f) return null;
+  const u = rig.speakPcm(f.pcm, { label: f.phrase });
+  gooseLine(s, f.phrase, u.done);
+  return { id: u.id, phrase: f.phrase };
+}
+
+export function interruptSession(id: string): void {
+  requireRig(id).rig.interrupt();
+}
+
+export async function honkSession(id: string): Promise<void> {
+  await requireRig(id).rig.honk();
+}
+
+export async function emoteSession(id: string, emote: Emote): Promise<void> {
+  await requireRig(id).rig.emote(emote);
+}
+
+export function avatarStatus(id: string): AvatarStatus | undefined {
+  return sessions.get(id)?.avatar;
 }
 
 async function startAudioCapture(page: Page, s: Session): Promise<void> {
@@ -582,12 +725,13 @@ async function startAudioCapture(page: Page, s: Session): Promise<void> {
           get: desc.get,
           set(this: HTMLMediaElement, v: MediaStream | null) {
             desc.set!.call(this, v);
+            if (this.dataset && this.dataset.plus1Avatar) return; // the goose's own voice/video, not the room
             tap(v);
           },
         });
       }
       const scan = () =>
-        document.querySelectorAll("audio,video").forEach((el) => {
+        document.querySelectorAll("audio:not([data-plus1-avatar]),video:not([data-plus1-avatar])").forEach((el) => {
           const stream = (el as HTMLMediaElement).srcObject as MediaStream | null;
           if (stream) tap(stream);
         });

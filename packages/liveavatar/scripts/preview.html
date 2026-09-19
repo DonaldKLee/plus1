@@ -1,0 +1,85 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>plus1 · LiveAvatar preview</title>
+<link rel="icon" href="data:," />
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #06090d; color: #dfe6ee; font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; display: grid; grid-template-columns: 1fr 380px; height: 100vh; }
+  #stage { display: grid; place-items: center; padding: 24px; }
+  #stage canvas { width: 100%; max-width: 1120px; aspect-ratio: 16/9; background: #000; border: 1px solid #1f2a36; border-radius: 6px; }
+  aside { border-left: 1px solid #1f2a36; padding: 16px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+  h1 { font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: #7f93a8; margin: 0 0 4px; }
+  button { background: #10171f; color: #dfe6ee; border: 1px solid #2b3947; border-radius: 4px; padding: 8px 10px; cursor: pointer; text-align: left; }
+  button:hover { border-color: #4f89c9; } button:disabled { opacity: .4; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; } .row button { flex: 1 1 auto; }
+  #status { color: #9fb3c8; } #status b { color: #e8f0ff; }
+  #meter { height: 6px; background: #10171f; border-radius: 3px; overflow: hidden; } #meter i { display: block; height: 100%; width: 0; background: #4f89c9; transition: width .1s; }
+  #log { flex: 1; overflow: auto; font-size: 12px; color: #8fa2b6; white-space: pre-wrap; border-top: 1px solid #1f2a36; padding-top: 8px; }
+  input[type=text] { width: 100%; box-sizing: border-box; background: #10171f; color: #dfe6ee; border: 1px solid #2b3947; border-radius: 4px; padding: 8px; }
+  input[type=file] { font-size: 12px; }
+</style>
+<div id="stage"></div>
+<aside>
+  <h1>plus1 · liveavatar preview</h1>
+  <div id="status">state <b id="st">idle</b> · video <b id="vid">–</b> · audio <b id="aud">–</b> · session <b id="sid">–</b></div>
+  <div id="meter"><i></i></div>
+  <div class="row"><button id="start">start session</button><button id="stop" disabled>stop</button></div>
+  <input id="text" type="text" placeholder="what should the goose say?" value="hey, what are we actually working on today?" />
+  <div class="row"><button id="speak" disabled>speak</button><button id="interrupt" disabled>interrupt</button></div>
+  <div class="row"><input id="wav" type="file" accept=".wav,audio/wav" /><button id="speakwav" disabled>speak wav</button></div>
+  <div class="row"><button id="honk" disabled>honk</button><button id="listen" disabled>listening pose</button><button id="idle" disabled>idle pose</button></div>
+  <div id="log"></div>
+</aside>
+<script src="/page.iife.js"></script>
+<script type="module">
+  const $ = (id) => document.getElementById(id);
+  const logEl = $("log");
+  const t0 = performance.now();
+  const log = (m) => { logEl.textContent = `+${Math.round(performance.now() - t0)}ms ${m}\n` + logEl.textContent.slice(0, 20000); };
+  // The bridge reports to window.__plus1AvatarEvent (Playwright's exposeFunction in the runner). Here we just log.
+  window.__plus1AvatarEvent = (e) => {
+    if (e.kind === "audioLevel") { $("meter").firstElementChild.style.width = `${Math.min(100, e.rms * 400)}%`; return; }
+    if (e.kind === "state") $("st").textContent = e.state;
+    if (e.kind === "tracks") { $("vid").textContent = e.video ? "✓" : "–"; $("aud").textContent = e.audio ? "✓" : "–"; }
+    log(JSON.stringify(e));
+  };
+  const info = await fetch("/api/info").then((r) => r.json()).catch(() => ({ tts: "?" }));
+  $("speak").textContent = info.tts === "elevenlabs" ? "speak (elevenlabs)" : "speak (tone)";
+  log(`server: tts=${info.tts} sandbox=${info.sandbox} avatar=${info.avatarId}`);
+  const bridge = window.__plus1Avatar;
+  bridge.configure({ label: "Reginald", monitorVolume: 1 }); // hear it locally in the preview
+  bridge.installFakeMedia();
+  $("stage").appendChild(window.__gooseCanvas);
+  // What Meet would receive as "camera + mic": prove the fake getUserMedia path works too.
+  const gum = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  log(`fake getUserMedia → ${gum.getVideoTracks().length} video, ${gum.getAudioTracks().length} audio track(s)`);
+
+  let sessionId = null;
+  const api = async (path, body) => { const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) }); const j = await r.json(); if (!r.ok) throw new Error(j.error ?? r.statusText); return j; };
+  const enable = (on) => { for (const id of ["stop", "speak", "interrupt", "speakwav", "honk", "listen", "idle"]) $(id).disabled = !on; $("start").disabled = on; };
+
+  $("start").onclick = async () => {
+    $("start").disabled = true;
+    try {
+      const m = await api("/api/session");
+      sessionId = m.sessionId; $("sid").textContent = sessionId.slice(0, 8);
+      log(`session ${sessionId} started; connecting page to ${m.livekitUrl}`);
+      const tracks = await bridge.connect({ livekitUrl: m.livekitUrl, livekitToken: m.livekitClientToken });
+      log(`tracks: ${JSON.stringify(tracks)}`);
+      enable(true);
+    } catch (e) { log(`start failed: ${e.message}`); $("start").disabled = false; }
+  };
+  $("stop").onclick = async () => { enable(false); await bridge.disconnect(); await api("/api/stop").catch(() => {}); $("sid").textContent = "–"; };
+  $("speak").onclick = async () => { bridge.setAvatarMuted(false); const r = await api("/api/speak", { text: $("text").value }); log(`utterance: ${JSON.stringify(r)}`); };
+  $("speakwav").onclick = async () => {
+    const f = $("wav").files[0]; if (!f) return log("pick a wav first");
+    bridge.setAvatarMuted(false);
+    const r = await fetch("/api/speak-wav", { method: "POST", body: await f.arrayBuffer() }).then((r) => r.json());
+    log(`utterance: ${JSON.stringify(r)}`);
+  };
+  $("interrupt").onclick = async () => { bridge.setAvatarMuted(true); await api("/api/interrupt"); };
+  $("honk").onclick = () => bridge.honk();
+  $("listen").onclick = () => api("/api/listening", { on: true });
+  $("idle").onclick = () => api("/api/listening", { on: false });
+  window.addEventListener("beforeunload", () => { if (sessionId) navigator.sendBeacon("/api/stop"); });
+</script>

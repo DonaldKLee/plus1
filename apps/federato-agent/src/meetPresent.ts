@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { BrowserContext, Page } from "playwright-core";
 import { chromium } from "playwright-core";
-import { CACHE_DIR, envOptional } from "./env.js";
+import { CACHE_DIR, ROOT, envOptional } from "./env.js";
 
 export const WORK_TAB_TITLE = "plus1-work";
 
@@ -29,8 +29,10 @@ function chromePath(): string | undefined {
   );
 }
 
+/** Chrome profile the goose/presenter joins with. MEET_PROFILE_DIR (relative to repo root) overrides. */
 export function screenshareProfileDir(): string {
-  return path.join(CACHE_DIR, "screenshare-profile");
+  const override = envOptional("MEET_PROFILE_DIR");
+  return override ? path.resolve(ROOT, override) : path.join(CACHE_DIR, "screenshare-profile");
 }
 
 /**
@@ -53,6 +55,8 @@ async function launchOnce() {
   return chromium.launchPersistentContext(screenshareProfileDir(), {
     headless: false,
     executablePath: chromePath(),
+    // The LiveAvatar bridge opens a LiveKit WebSocket from inside the Meet tab; Meet's CSP would block it.
+    bypassCSP: true,
     ignoreDefaultArgs: [
       "--enable-automation",
       "--disable-component-extensions-with-background-pages",
@@ -60,6 +64,7 @@ async function launchOnce() {
     args: [
       "--autoplay-policy=no-user-gesture-required",
       "--disable-blink-features=AutomationControlled",
+      "--use-fake-ui-for-media-stream", // auto-accept the camera/mic prompt (the devices are the avatar's canvas + mixer)
       `--auto-select-tab-capture-source-by-title=${WORK_TAB_TITLE}`,
       `--auto-select-desktop-capture-source=${WORK_TAB_TITLE}`,
     ],
@@ -209,13 +214,18 @@ async function dumpMeetDebug(page: Page, notes: string[]): Promise<void> {
   }
 }
 
-export async function joinMeet(
-  page: Page,
-  notes: string[],
-  opts?: { muted?: boolean },
-): Promise<boolean> {
-  const muted = opts?.muted !== false; // default: join muted
-  await page.waitForLoadState("domcontentloaded");
+export interface JoinOptions {
+  /** Join muted (presenter) or unmuted (the goose). Default muted. */
+  muted?: boolean;
+  /** "on": camera stays on — it's the avatar. Default "off". */
+  camera?: "on" | "off";
+  /** Guest display name if the profile isn't signed in. */
+  displayName?: string;
+}
+
+export async function joinMeet(page: Page, notes: string[], opts: JoinOptions = {}): Promise<boolean> {
+  const muted = opts.muted !== false; // default: join muted
+  await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
   await waitForGoogleSession(page, notes);
   await page.waitForTimeout(2500);
   await dismissNoise(page);
@@ -223,7 +233,7 @@ export async function joinMeet(
   const nameBox = page.getByLabel(/your name/i).first();
   if (await nameBox.isVisible().catch(() => false)) {
     notes.push("Guest name field is showing — this profile is not signed into Google.");
-    await nameBox.fill("plus1 UW");
+    await nameBox.fill(opts.displayName ?? "plus1 UW");
   } else {
     notes.push("Signed-in Meet prejoin (no guest name field).");
   }
@@ -239,7 +249,11 @@ export async function joinMeet(
   } else {
     notes.push("Joining unmuted so the goose can speak.");
   }
-  if (!(await clickNamed(page, /turn off camera/i, 1200))) {
+  if (opts.camera === "on") {
+    // The goose: the camera is the avatar. Only click "Turn on camera" if Meet shows it.
+    if (await clickNamed(page, /turn on camera/i, 1000)) notes.push("Camera was off; turned on.");
+    if (!muted && (await clickNamed(page, /turn on (microphone|mic)/i, 1000))) notes.push("Mic was off; turned on.");
+  } else if (!(await clickNamed(page, /turn off camera/i, 1200))) {
     await page.keyboard.press(`${mods}+e`).catch(() => {});
   }
   await dismissNoise(page);
@@ -258,13 +272,20 @@ export async function joinMeet(
 
   // Keep trying the Join control — it can take a few seconds to enable, and
   // Meet sometimes throws up a dialog between clicks.
-  const deadline = Date.now() + 60_000;
+  // Meet shows this when the host denies/ignores an anonymous "Ask to join", or the org blocks guests.
+  const refused = page.getByText(/can't join this video call|you can.t join|denied your request|no one responded/i).first();
+
+  const deadline = Date.now() + (opts.camera === "on" ? 180_000 : 60_000);
   let clickedOnce: string | null = null;
   while (Date.now() < deadline) {
     if (await inMeeting()) {
       await dismissNoise(page);
       notes.push("In the meeting.");
       return true;
+    }
+    if (await refused.isVisible().catch(() => false)) {
+      notes.push("Meet refused the join: the host denied/ignored the request, or this meeting blocks anonymous guests. Sign the profile into Google (npm run google-login) and try again.");
+      return false;
     }
     const clicked = await clickJoinish(page);
     if (clicked) {

@@ -5,17 +5,13 @@
  * agent, not in packages/brain (which stays pure per the project constraint).
  */
 
-import path from "node:path";
-import fs from "node:fs";
 import type { Page } from "playwright-core";
-import { CACHE_DIR, env, envOptional } from "./env.js";
+import { env, envOptional } from "./env.js";
 import { rankQueue } from "./rank.js";
 
 // gemini-flash-latest currently maps to gemini-3.8-flash (only 20 free req/day).
 // flash-lite-latest has far more free headroom and is plenty for classification.
 const DECIDE_MODEL = process.env.GEMINI_BRAIN_MODEL || "gemini-flash-lite-latest";
-const ELEVEN_VOICE = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM"; // Rachel
-const ELEVEN_MODEL = process.env.ELEVENLABS_MODEL || "eleven_turbo_v2_5";
 
 export type ActionKind = "speak" | "chat" | "tool" | "none";
 
@@ -30,12 +26,14 @@ export interface Decision {
 }
 
 const AGENT_NAME = "plus one";
+/** The goose's display name in Meet; people will address it by this too. */
+export const GOOSE_NAME = envOptional("GOOSE_NAME") ?? "Reginald";
 
 const SYSTEM_PROMPT = `You are "${AGENT_NAME}", an AI teammate silently attending a live meeting as a participant.
 You are given the most recent lines of the meeting transcript. Decide whether to act RIGHT NOW.
 
 Act ONLY when it is clearly useful and welcome:
-- Someone addresses you by name ("${AGENT_NAME}", "plus one", "plus-one").
+- Someone addresses you by name ("${AGENT_NAME}", "plus-one", or "${GOOSE_NAME}").
 - Someone asks an open question you can directly and helpfully answer.
 - A tool you have would materially help answer something just asked.
 Otherwise set act=false and action="none". When in doubt, stay quiet — a silent teammate is better than a noisy one. Never react to your own previous messages.
@@ -46,7 +44,7 @@ Actions:
 - "tool": call a tool to look something up. Set tool.name and tool.query.
 Available tools: federato_appetite(query) — checks underwriting appetite / whether a risk fits, given a plain-language query.
 
-Keep spoken and chat replies to one or two natural sentences. Set confidence 0..1 for how sure you are that acting now is the right call.`;
+Keep spoken and chat replies to one or two natural sentences, lowercase and conversational — you talk like a colleague on a call, not a chatbot. Set confidence 0..1 for how sure you are that acting now is the right call.`;
 
 const RESPONSE_SCHEMA = {
   type: "object",
@@ -154,144 +152,8 @@ export async function postToMeetChat(page: Page, message: string): Promise<boole
   }
 }
 
-// ── Action: speak via ElevenLabs, routed into Meet through a virtual mic ────
-
-/** Synthesize speech with ElevenLabs; returns MP3 bytes. */
-async function elevenLabsTts(text: string): Promise<Buffer> {
-  const key = env("ELEVENLABS_API_KEY");
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "xi-api-key": key, "content-type": "application/json", accept: "audio/mpeg" },
-    body: JSON.stringify({
-      text,
-      model_id: ELEVEN_MODEL,
-      voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`ElevenLabs ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  }
-  return Buffer.from(await res.arrayBuffer());
-}
-
-export interface SpeakResult {
-  ok: boolean;
-  routedIntoMeet: boolean;
-  note: string;
-}
-
-/**
- * Speak `text` into the meeting. Plays the TTS through the BlackHole virtual
- * output device (via setSinkId) so it loops into Chrome's BlackHole mic and
- * transmits to the room. Falls back to local playback if BlackHole is absent.
- */
-export async function speakIntoMeet(page: Page, text: string): Promise<SpeakResult> {
-  let mp3: Buffer;
-  try {
-    mp3 = await elevenLabsTts(text);
-  } catch (e) {
-    return { ok: false, routedIntoMeet: false, note: (e as Error).message };
-  }
-
-  // Keep a copy for debugging / local fallback playback.
-  const file = path.join(CACHE_DIR, `speak-${Date.now()}.mp3`);
-  try {
-    fs.writeFileSync(file, mp3);
-  } catch {
-    /* cache dir may be missing */
-  }
-  const dataUrl = `data:audio/mpeg;base64,${mp3.toString("base64")}`;
-
-  // The goose joins unmuted; make sure it still is, then play into BlackHole.
-  await setMicMuted(page, false);
-
-  const result = await page
-    .evaluate(async (src: string) => {
-      let outputs: string[] = [];
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        outputs = devices
-          .filter((d) => d.kind === "audiooutput")
-          .map((d) => d.label || "(unlabeled)");
-      } catch {
-        /* enumeration blocked */
-      }
-      const bhLabel = outputs.find((l) => /blackhole|virtual|loopback|aggregate|multi/i.test(l));
-
-      const audio = new Audio();
-      audio.src = src;
-      let routed = false;
-      let playError = "";
-      const anyAudio = audio as unknown as {
-        setSinkId?: (id: string) => Promise<void>;
-      };
-      if (bhLabel && anyAudio.setSinkId) {
-        try {
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          const bh = devices.find((d) => d.kind === "audiooutput" && d.label === bhLabel);
-          if (bh) {
-            await anyAudio.setSinkId(bh.deviceId);
-            routed = true;
-          }
-        } catch (e) {
-          playError = `setSinkId: ${(e as Error).message}`;
-        }
-      }
-      try {
-        await audio.play();
-      } catch (e) {
-        playError = `play: ${(e as Error).message}`;
-      }
-      await new Promise<void>((resolve) => {
-        audio.onended = () => resolve();
-        audio.onerror = () => resolve();
-        setTimeout(resolve, 30000); // safety timeout
-      });
-      return { routed, outputs, bhLabel: bhLabel ?? null, playError };
-    }, dataUrl)
-    .catch((e) => ({ routed: false, outputs: [], bhLabel: null, playError: String(e) }));
-
-  // Stay unmuted — the goose joined unmuted and its BlackHole mic is silent
-  // between replies anyway, so there's nothing to mute.
-
-  let note: string;
-  if (result.routed) {
-    note = `Spoke via "${result.bhLabel}". If the room can't hear it, set that same device as the goose's microphone in Meet settings.`;
-  } else if (result.bhLabel) {
-    note = `Found "${result.bhLabel}" but couldn't route to it (${result.playError || "setSinkId unavailable"}). Played on default output.`;
-  } else {
-    note =
-      `No virtual audio device found — reply played on the goose's default output, not into the meeting. ` +
-      `Install BlackHole and set it as the goose's mic. Outputs seen: ${result.outputs.join(", ") || "none"}.`;
-  }
-
-  return { ok: true, routedIntoMeet: result.routed, note };
-}
-
-/**
- * Force the Meet mic to a known state. Meet labels the button "Turn on
- * microphone" while muted and "Turn off microphone" while live, so we click the
- * one that matches our target; keyboard shortcut is the fallback.
- */
-async function setMicMuted(page: Page, muted: boolean): Promise<void> {
-  const wanted = muted ? /turn off microphone/i : /turn on microphone/i;
-  try {
-    const btn = page.getByRole("button", { name: wanted }).first();
-    if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await btn.click({ timeout: 1500 });
-      return;
-    }
-    // Button not in the wanted state → already there, or use the shortcut.
-    const opposite = muted ? /turn on microphone/i : /turn off microphone/i;
-    const oppBtn = page.getByRole("button", { name: opposite }).first();
-    if (await oppBtn.isVisible().catch(() => false)) return; // already in target state
-  } catch {
-    /* fall through to keyboard */
-  }
-  const mods = process.platform === "darwin" ? "Meta" : "Control";
-  await page.keyboard.press(`${mods}+d`).catch(() => {});
-}
+// Speaking is done by the LiveAvatar rig (packages/liveavatar + packages/voice): see
+// speakInSession in meetTranscribe.ts. No virtual audio devices involved.
 
 // ── Action: tools ──────────────────────────────────────────────────────────
 
@@ -312,6 +174,4 @@ export async function runTool(name: string, query?: string): Promise<string> {
   return `Unknown tool: ${name}`;
 }
 
-export function elevenLabsConfigured(): boolean {
-  return Boolean(envOptional("ELEVENLABS_API_KEY"));
-}
+

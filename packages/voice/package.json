@@ -1,0 +1,33 @@
+{
+  "name": "@plus1/voice",
+  "version": "0.1.0",
+  "private": true,
+  "description": "plus1's voice: ElevenLabs streaming TTS as PCM 24 kHz mono for the LiveAvatar rig, plus pre-cached filler phrases.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "say": "tsx scripts/say.ts",
+    "voices": "tsx scripts/voices.ts",
+    "fillers": "tsx scripts/fillers.ts",
+    "e2e": "tsx scripts/e2e.ts"
+  },
+  "dependencies": {
+    "@plus1/liveavatar": "*"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.7",
+    "tsx": "^4.19.0",
+    "typescript": "5.7.3",
+    "vitest": "^3.0.0"
+  }
+}

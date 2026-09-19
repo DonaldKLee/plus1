@@ -134,6 +134,63 @@ describe("AvatarRig", () => {
     await rig.stop();
   });
 
+  it("say() re-sends a line whose session died mid-sentence", async () => {
+    const page = new FakePage();
+    const rig = make(page);
+    await rig.prepare(page);
+    await rig.start();
+
+    const warnings: string[] = [];
+    rig.on("warning", (w) => warnings.push(w));
+
+    // Kill the session the moment the line starts going out — exactly the
+    // "socket closed mid-utterance" the runner was reporting every couple of
+    // minutes when a sandbox session hit its max duration.
+    const said = rig.say("here's the number you asked for", { leadSeconds: 0.2 });
+    await new Promise((r) => setTimeout(r, 20));
+    mock.dropSockets(1011, "max duration reached");
+
+    const result = await said.done;
+    expect(result.outcome).toBe("completed"); // the room heard it
+    expect(result.attempts).toBeGreaterThan(1); // because it was sent again
+    expect(warnings.some((w) => /saying it again/.test(w))).toBe(true);
+    expect(rig.sessionState).toBe("ready");
+    await rig.stop();
+  });
+
+  it("say() does NOT repeat a line a human interrupted", async () => {
+    const page = new FakePage();
+    const rig = make(page);
+    await rig.prepare(page);
+    await rig.start();
+
+    const said = rig.say("so the way this normally works is", { leadSeconds: 0.2 });
+    await new Promise((r) => setTimeout(r, 40));
+    rig.interrupt(); // barge-in: someone took the floor
+
+    const result = await said.done;
+    expect(result.outcome).toBe("interrupted");
+    expect(result.attempts).toBe(1); // stopped talking, stayed stopped
+    await rig.stop();
+  });
+
+  it("say() waits out a restart instead of dropping the line", async () => {
+    const page = new FakePage();
+    const rig = make(page);
+    await rig.prepare(page);
+    await rig.start();
+
+    // Session is gone and the rig is mid-restart: speakText() would throw
+    // "not ready" and the line would be lost.
+    mock.dropSockets(1011, "max duration reached");
+    await new Promise((r) => setTimeout(r, 5));
+    expect(() => rig.speakPcm(synthTone(10))).toThrow(/not ready/);
+
+    const result = await rig.say("ok, here's what i found", { leadSeconds: 0.2 }).done;
+    expect(result.outcome).toBe("completed");
+    await rig.stop();
+  });
+
   it("gives up after maxRestartAttempts and emits dead", async () => {
     const page = new FakePage();
     const rig = make(page, { maxRestartAttempts: 2 });

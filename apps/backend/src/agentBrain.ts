@@ -31,6 +31,88 @@ export interface Decision {
     details?: Record<string, unknown>; // structured quote inputs for intact_*
   };
   remember?: string[];
+  /** Slot-filling update for the running meeting state. */
+  state?: StateUpdate;
+}
+
+// ── Meeting state (slot filling) ───────────────────────────────────────────
+// Bob is a slot filler: he tracks the task he is working on, the parameters he
+// has already collected, and what is still missing. The whole state is injected
+// into every prompt as ground truth, so he never re-asks for something he was
+// already told — even after it scrolls out of the transcript window.
+
+export interface MeetingState {
+  activeTask: string;
+  collected: Record<string, string>;
+  missing: string[];
+  completed: string[];
+}
+
+/** What the model may change about the state on a turn. */
+export interface StateUpdate {
+  activeTask?: string;
+  collected?: { key: string; value: string }[];
+  missing?: string[];
+}
+
+export function emptyState(): MeetingState {
+  return { activeTask: "None", collected: {}, missing: [], completed: [] };
+}
+
+const COMPLETED_CAP = 12;
+
+/** Fold a model-proposed update into the session's state, in place. */
+export function applyStateUpdate(state: MeetingState, update?: StateUpdate): void {
+  if (!update) return;
+  const task = update.activeTask?.trim();
+  if (task) state.activeTask = task;
+  for (const pair of update.collected ?? []) {
+    const key = pair?.key?.trim();
+    if (!key) continue;
+    const value = typeof pair.value === "string" ? pair.value.trim() : "";
+    // An explicit empty value clears a slot (e.g. the user changed their mind).
+    if (value) state.collected[key] = value;
+    else delete state.collected[key];
+  }
+  if (Array.isArray(update.missing)) {
+    state.missing = update.missing
+      .filter((m): m is string => typeof m === "string" && m.trim().length > 0)
+      .map((m) => m.trim())
+      // Anything we already have is not missing, whatever the model claims.
+      .filter((m) => !(m in state.collected));
+  }
+}
+
+/** Record a finished action so Bob never silently repeats it. */
+export function recordCompletedAction(state: MeetingState, summary: string): void {
+  const item = summary.trim();
+  if (!item) return;
+  state.completed.push(item);
+  if (state.completed.length > COMPLETED_CAP) {
+    state.completed = state.completed.slice(-COMPLETED_CAP);
+  }
+}
+
+/** The CURRENT MEETING STATE block — ground truth, injected every turn. */
+function renderState(state?: MeetingState): string {
+  const st = state ?? emptyState();
+  const json = JSON.stringify(
+    {
+      active_task: st.activeTask || "None",
+      collected_parameters: st.collected,
+      missing_parameters: st.missing,
+      completed_actions: st.completed,
+    },
+    null,
+    2,
+  );
+  return `
+CURRENT MEETING STATE (GROUND TRUTH — everything here is already known):
+\`\`\`json
+${json}
+\`\`\`
+Never ask for anything listed in collected_parameters; you already have it. Never redo anything in completed_actions. When you learn a new fact, put it in "state.collected" as a key/value pair, name the task you're working in "state.activeTask", and list what you still need in "state.missing" — then ask for the single most important missing item.
+`;
 }
 
 /** Which tools this session may use. Built from the dashboard Goose config. */
@@ -87,9 +169,8 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
   return tools;
 }
 
-const AGENT_NAME = "goose";
 /** Default display name if the session config doesn't set one. */
-export const GOOSE_NAME = envOptional("GOOSE_NAME") ?? "Goose";
+export const GOOSE_NAME = envOptional("AGENT_NAME") ?? envOptional("GOOSE_NAME") ?? "Bob";
 
 /** 0 = pure notetaker, 100 = eager action-taker. */
 function autonomyStance(autonomy: number): string {
@@ -108,11 +189,12 @@ function buildSystemPrompt(opts: {
   tools: ToolSpec[];
   memory?: string[];
   muted?: boolean;
+  state?: MeetingState;
 }): string {
   const name = opts.name;
   const hasTools = opts.tools.length > 0;
   const toolsSection = hasTools
-    ? `- "tool": call a tool to look something up or act. Set tool.name plus its arguments (query, path, content, and/or command). ALWAYS also set "say" to a short, natural line telling the room what you're about to do BEFORE it happens (e.g. "let me check the downloads folder" / "one sec, making that pdf now") — a tool call must never be silent.
+    ? `- "tool": call a tool to look something up or actually do something. Set tool.name plus its arguments (query, path, content, and/or command). ALWAYS also set "say" to a short, natural line telling the room what you're about to do BEFORE it happens (e.g. "let me look into that toyota bz for you, one sec" / "ok, making that pdf now") — a tool call must NEVER be silent. The room hears "say", then the tool runs, then you come back with the real answer.
 Available tools:
 ${opts.tools.map((t) => `  - ${t.doc}`).join("\n")}`
     : `You have no tools available right now.`;
@@ -124,24 +206,45 @@ ${opts.memory.map((m) => `  - ${m}`).join("\n")}\n`
   const mutedNote = opts.muted
     ? `\nYou are in CHAT-ONLY mode right now: someone asked you to stop talking and use the chat. Keep participating exactly as before, but your words go to the meeting chat, not out loud. Stay this way until someone tells you to talk / unmute again.\n`
     : "";
-  return `You are "${name}", an AI teammate attending a live meeting as a real participant — not a bot.
-You are given the most recent lines of the meeting transcript. Decide what to do RIGHT NOW.
+  return `You are "${name}", a proactive meeting advisor and action-taker sitting in a live meeting as a real participant.
 
-Your job is to CATCH MISTAKES and PARTICIPATE — you're here to keep everyone honest and pitch in, not just answer when spoken to. Watch for wrong numbers, claims that contradict something said earlier or something you know, missing steps, and anything that seems off — and jump in when you catch one, briefly, and only when you're fairly sure. When someone hands you a standing instruction ("let us know if you spot mistakes", "remind me to X later", "her name is actually Y", "mute and use the chat"), put a short note in "remember" so you don't lose it once it scrolls away.
+You are NOT a passive chatbot waiting for commands. You are the expert advisor in the room: you guide the conversation, figure out what people actually need, and take concrete action to solve it. You are given the most recent lines of the meeting transcript. Decide what to do RIGHT NOW.
 
-What you can actually do is defined by your TOOLS listed below — nothing more, nothing less. If a tool covers what someone asked, USE IT: return action="tool" and call it. Never tell someone you "only do X", "can't help with that", or "don't do that here" when a tool clearly can. And NEVER stall — saying "on it" / "one sec" / "pulling it up" / "looking into it" WITHOUT calling the tool in that same turn is a failure. Call the tool, then give the actual answer. You don't run slow background systems; a tool returns immediately.
+HOW YOU TALK (this is a live audio call — pacing matters):
+- Brief and conversational. One or two sentences, lowercase, contractions. Never monologue; a long answer is worse than a short one plus a question.
+- Acknowledge before you answer, the way a person does: "got it", "understood", "makes sense".
+- Never say you are an AI, a bot, a model, or a language model. No robot speak. You're a competent teammate.
+- Never react to your own previous lines. Lines marked [${name.toLowerCase()}] in the transcript are things YOU already said.
+- If someone calls you the wrong name ("Goose", "Bill", whatever), correct it once, lightly, with a bit of humour, and move straight on — don't make it a thing.
 
-Talk like a colleague on a call: warm, brief, lowercase, one or two sentences, contractions. Never sound like a chatbot. Never react to your own previous messages.
-${memorySection}${mutedNote}
+LEAD THE CONVERSATION:
+- Lead with questions. A vague problem gets ONE targeted, clarifying question that narrows down the action you're about to take — not a generic essay.
+- Ask for one thing at a time. Never interrogate someone with a list of fields.
+- Drive the next step. End most turns by either asking for the next piece of information you need, or confirming the action you're about to take: "i can put that pdf together now — want it focused on pricing or the technical specs?"
+
+TAKING ACTION (the part people actually care about):
+- What you can do is defined by your TOOLS below — nothing more, nothing less. If a tool covers what someone asked, USE IT (action="tool"). Never say you "only do X", "can't help with that", or "don't do that here" when a tool clearly can.
+- Verbalize BEFORE executing. Never run a tool silently — "say" goes out loud first, then the tool runs.
+- But NEVER stall either: "on it" / "one sec" / "let me check" WITHOUT a tool call in that same turn is a failure. Announce and call in the SAME turn.
+- No premature execution. Don't fire an action tool until you have the parameters it genuinely needs — use your questions to fill the gaps first. That said, a tool that fills in sensible defaults should be called early and refined after; quoting beats interrogating.
+- Once a tool comes back, you'll get its result and say the useful part of it out loud in plain language — a number, a decision, a filename — not a data dump, and then the obvious next step.
+
+ALSO PART OF THE JOB — catch mistakes: wrong numbers, claims that contradict something said earlier, missing steps. Jump in briefly when you're fairly sure. When someone hands you a standing instruction ("flag it if we get something wrong", "remind me later", "her name is actually Y", "mute and use the chat"), put a short note in "remember".
+
+GUARDRAILS:
+- Never stall silently. If you're working on something, say so.
+- Deflect off-topic noise. If the room drifts onto something you're not here to advise on, give it a beat and steer back to the active task.
+- Be aware other people are in the room. Only speak when you're addressed or when your specific expertise or action is clearly what's needed. When humans are working something out between themselves, stay out of it (action="none").
+${memorySection}${mutedNote}${renderState(opts.state)}
 Act when it is useful and welcome:
-- Someone addresses you ("${name}", "goose", or "plus one").
+- Someone addresses you ("${name}" or "plus one").
 - Someone asks an open question you or a tool can helpfully answer.
 - An open task is floated to the room ("can someone…", "we should…", "who can…", "we need to…") and no human has taken it.
+- You're mid-task and you still need a missing parameter — go get it.
 
-Owning and yielding tasks (this is what makes you feel human):
+Owning and yielding tasks:
 - Open task nobody has taken → VOLUNTEER out loud: "i can take that" / "on it", and start doing it.
 - The moment a human claims a task — even one you just took — YIELD immediately: "ok, all yours", and drop it. Never fight a human for a task.
-- If humans are sorting out who does something, stay out of it (action="none").
 - Once a task is yours, DO it (look it up, draft it, post it) rather than just talking about it.
 
 Your stance: ${autonomyStance(opts.autonomy)}
@@ -150,14 +253,50 @@ Actions:
 - "speak": say something out loud in the room. Put the words in "say".
 - "chat": post a message to the meeting text chat (use this when asked to "put it in the chat", or to share a draft / link / longer text). Put the text in "chatMessage".
 ${toolsSection}
+- "none": stay quiet this turn.
 
 Put anything worth holding onto for later into "remember" — a short phrase per item (new facts, standing instructions to watch for, name corrections). Only add what's genuinely worth remembering.
+Keep "state" up to date on every turn you learn something: state.activeTask, state.collected (key/value pairs of facts you now have), state.missing (what you still need).
 Set confidence 0..1 for how sure you are that acting now is the right call.`;
 }
 
 const ONE_ON_ONE_NOTE = `\n\nIMPORTANT: This is a one-on-one — only you and ONE other person are in the meeting, so everything they say is spoken directly to you. Respond to them, almost always with action="speak", as you would in a normal back-and-forth conversation. Only stay silent (action="none") if they clearly didn't say anything needing a response (e.g. filler like "um" or "one sec"). Default confidence should be high.`;
 
 const CHAT_NOTE = `\n\nIMPORTANT: You are in a direct TEXT CHAT with one person — often a broker asking for help, or someone testing you. It is not a live meeting. Every message is addressed to you, so reply to each one (use action="speak" — the words in "say" are shown as your chat reply). Use tools whenever they help, and always narrate what you're doing. If the request would go much better live — you need to walk them through something, screen-share, or it's turning into real back-and-forth — offer to hop on a meeting together. Default confidence should be high.`;
+
+/** Slot-filling update the model returns alongside its action. */
+const STATE_SCHEMA = {
+  type: "object",
+  properties: {
+    activeTask: { type: "string" },
+    collected: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { key: { type: "string" }, value: { type: "string" } },
+        required: ["key", "value"],
+      },
+    },
+    missing: { type: "array", items: { type: "string" } },
+  },
+} as const;
+
+/** Normalize a raw model state blob into a StateUpdate, or undefined. */
+function parseStateUpdate(raw: unknown): StateUpdate | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as { activeTask?: unknown; collected?: unknown; missing?: unknown };
+  const out: StateUpdate = {};
+  if (typeof r.activeTask === "string" && r.activeTask.trim()) out.activeTask = r.activeTask.trim();
+  if (Array.isArray(r.collected)) {
+    out.collected = r.collected
+      .filter((p): p is { key: string; value: string } => !!p && typeof (p as { key?: unknown }).key === "string")
+      .map((p) => ({ key: p.key, value: typeof p.value === "string" ? p.value : String(p.value ?? "") }));
+  }
+  if (Array.isArray(r.missing)) {
+    out.missing = r.missing.filter((m): m is string => typeof m === "string");
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 function buildResponseSchema(tools: ToolSpec[]) {
   const actions = tools.length > 0 ? ["speak", "chat", "tool", "none"] : ["speak", "chat", "none"];
@@ -171,6 +310,7 @@ function buildResponseSchema(tools: ToolSpec[]) {
       say: { type: "string" },
       chatMessage: { type: "string" },
       remember: { type: "array", items: { type: "string" } },
+      state: STATE_SCHEMA,
     },
     required: ["act", "action", "confidence", "reason"],
   };
@@ -203,39 +343,25 @@ function buildResponseSchema(tools: ToolSpec[]) {
   return schema;
 }
 
-/** Ask Gemini whether to act on the current transcript window. */
-export async function decideAction(
-  transcript: string,
-  opts?: {
-    oneOnOne?: boolean;
-    name?: string;
-    autonomy?: number;
-    access?: ToolAccess;
-    channel?: "meeting" | "chat";
-    memory?: string[];
-    muted?: boolean;
-  },
-): Promise<Decision> {
+/**
+ * One structured-JSON Gemini call, with the retry policy both brain calls share.
+ * Retries 5xx and per-minute 429s. A per-DAY quota 429 won't clear by retrying,
+ * so it surfaces as a distinct `quota` error the caller can report once.
+ */
+async function generateJson(
+  systemText: string,
+  userText: string,
+  schema: Record<string, unknown>,
+  temperature = 0.2,
+): Promise<Record<string, unknown>> {
   const key = env("GEMINI_API_KEY");
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${DECIDE_MODEL}:generateContent?key=${key}`;
-  const name = opts?.name?.trim() || GOOSE_NAME;
-  const autonomy = typeof opts?.autonomy === "number" ? opts.autonomy : 50;
-  const tools = toolCatalog(opts?.access ?? {});
-  const channelNote = opts?.channel === "chat" ? CHAT_NOTE : opts?.oneOnOne ? ONE_ON_ONE_NOTE : "";
-  const systemText =
-    buildSystemPrompt({ name, autonomy, tools, memory: opts?.memory, muted: opts?.muted }) + channelNote;
   const body = {
     systemInstruction: { parts: [{ text: systemText }] },
-    contents: [{ role: "user", parts: [{ text: `Recent transcript:\n${transcript}` }] }],
-    generationConfig: {
-      temperature: 0.2,
-      responseMimeType: "application/json",
-      responseSchema: buildResponseSchema(tools),
-    },
+    contents: [{ role: "user", parts: [{ text: userText }] }],
+    generationConfig: { temperature, responseMimeType: "application/json", responseSchema: schema },
   };
 
-  // Retry 5xx and per-minute 429s (transient). A per-DAY quota 429 won't clear
-  // by retrying, so surface it as a distinct quota error.
   let res: Response | undefined;
   let lastErr = "";
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -269,7 +395,47 @@ export async function decideAction(
     candidates?: { content?: { parts?: { text?: string }[] } }[];
   };
   const raw = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
-  const parsed = JSON.parse(raw) as Decision;
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+/** Ask Gemini whether to act on the current transcript window. */
+export async function decideAction(
+  transcript: string,
+  opts?: {
+    oneOnOne?: boolean;
+    name?: string;
+    autonomy?: number;
+    access?: ToolAccess;
+    channel?: "meeting" | "chat";
+    memory?: string[];
+    muted?: boolean;
+    state?: MeetingState;
+  },
+): Promise<Decision> {
+  const name = opts?.name?.trim() || GOOSE_NAME;
+  const autonomy = typeof opts?.autonomy === "number" ? opts.autonomy : 50;
+  const tools = toolCatalog(opts?.access ?? {});
+  const channelNote = opts?.channel === "chat" ? CHAT_NOTE : opts?.oneOnOne ? ONE_ON_ONE_NOTE : "";
+  const systemText =
+    buildSystemPrompt({
+      name,
+      autonomy,
+      tools,
+      memory: opts?.memory,
+      muted: opts?.muted,
+      state: opts?.state,
+    }) + channelNote;
+
+  const parsed = (await generateJson(
+    systemText,
+    `Recent transcript:\n${transcript}`,
+    buildResponseSchema(tools),
+  )) as Partial<Decision> & { state?: unknown };
+
   return {
     act: Boolean(parsed.act),
     action: parsed.action ?? "none",
@@ -281,7 +447,104 @@ export async function decideAction(
     remember: Array.isArray(parsed.remember)
       ? parsed.remember.filter((r): r is string => typeof r === "string" && r.trim().length > 0)
       : undefined,
+    state: parseStateUpdate(parsed.state),
   };
+}
+
+// ── The follow-up turn: turn a raw tool result into something Bob says ─────
+// This is the piece that was missing. A tool used to run and its output went
+// nowhere the room could hear, so Bob announced "let me check…" and then went
+// silent forever. Now every tool result gets a second brain turn that phrases
+// the answer out loud and drives the next step.
+
+export interface ToolReply {
+  say: string;
+  remember?: string[];
+  state?: StateUpdate;
+}
+
+const TOOL_REPLY_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    say: { type: "string" },
+    remember: { type: "array", items: { type: "string" } },
+    state: STATE_SCHEMA,
+  },
+  required: ["say"],
+};
+
+/** Trim a tool result to something a prompt can carry without blowing up. */
+function clampResult(result: string, max = 4000): string {
+  const s = result.trim();
+  return s.length <= max ? s : `${s.slice(0, max)}\n…(truncated)`;
+}
+
+/**
+ * Report a finished tool call back to the room. Returns the line to speak.
+ * Falls back to reading the raw result if the model is unavailable — the room
+ * must ALWAYS hear something after an announced tool call.
+ */
+export async function narrateToolResult(opts: {
+  toolName: string;
+  args: string;
+  result: string;
+  transcript: string;
+  name?: string;
+  autonomy?: number;
+  access?: ToolAccess;
+  channel?: "meeting" | "chat";
+  memory?: string[];
+  muted?: boolean;
+  state?: MeetingState;
+  announced?: string;
+}): Promise<ToolReply> {
+  const name = opts.name?.trim() || GOOSE_NAME;
+  const base = buildSystemPrompt({
+    name,
+    autonomy: typeof opts.autonomy === "number" ? opts.autonomy : 50,
+    tools: toolCatalog(opts.access ?? {}),
+    memory: opts.memory,
+    muted: opts.muted,
+    state: opts.state,
+  });
+  const systemText = `${base}
+
+RIGHT NOW you are DELIVERING A TOOL RESULT. You already told the room you were going to check something, the tool has come back, and everyone is waiting on you. Put the answer in "say":
+- Lead with the actual answer — the number, the decision, the price, the filename. Never "i found some information"; say what it is.
+- One or two sentences, spoken out loud on a call. No lists, no markdown, no raw JSON, no field names, no ids. Read numbers the way a person says them.
+- If the tool made assumptions or used defaults, name the one that matters most and offer to change it.
+- If the tool failed or came back empty, say so plainly in one line and offer the next thing you can try. Never pretend it worked.
+- End by driving the next step: the single most useful next question, or a confirmation of the action you'd take next.
+- Do not repeat the line you already said before running the tool.
+- Update "state": add what the tool established to state.collected, and put what you still need in state.missing.`;
+
+  const userText = `Recent transcript:
+${opts.transcript}
+
+${opts.announced ? `You just said out loud: "${opts.announced}"\n` : ""}Tool you just ran: ${opts.toolName}(${opts.args || "no arguments"})
+Raw tool result:
+${clampResult(opts.result)}
+
+Now say the answer to the room.`;
+
+  try {
+    const parsed = (await generateJson(systemText, userText, TOOL_REPLY_SCHEMA, 0.3)) as {
+      say?: string;
+      remember?: unknown;
+      state?: unknown;
+    };
+    const say = typeof parsed.say === "string" ? parsed.say.trim() : "";
+    return {
+      say: say || clampResult(opts.result, 600),
+      remember: Array.isArray(parsed.remember)
+        ? parsed.remember.filter((r): r is string => typeof r === "string" && r.trim().length > 0)
+        : undefined,
+      state: parseStateUpdate(parsed.state),
+    };
+  } catch {
+    // Quota gone or Gemini down: read the tool's own words rather than go silent.
+    return { say: clampResult(opts.result, 600) };
+  }
 }
 
 // ── Action: post to the Google Meet chat ───────────────────────────────────

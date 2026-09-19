@@ -6,7 +6,16 @@
  */
 import { randomUUID } from "node:crypto";
 import type { QuoteResult } from "@plus1/brain";
-import { decideAction, GOOSE_NAME, type ToolAccess } from "./agentBrain.js";
+import {
+  applyStateUpdate,
+  decideAction,
+  emptyState,
+  GOOSE_NAME,
+  narrateToolResult,
+  recordCompletedAction,
+  type MeetingState,
+  type ToolAccess,
+} from "./agentBrain.js";
 import { executeTool } from "./tools.js";
 import type { SessionConfig } from "./meetTranscribe.js";
 
@@ -25,7 +34,20 @@ interface ChatSession {
   config?: SessionConfig;
   messages: ChatMessage[];
   memory: string[]; // standing instructions + facts to honor every turn
+  state: MeetingState; // slot filling, same shape the meeting runner keeps
   createdAt: string;
+}
+
+const MEMORY_CAP = 24;
+
+/** Merge new things-to-remember into the chat's standing memory. */
+function remember(c: ChatSession, items?: string[]): void {
+  if (!items?.length) return;
+  for (const raw of items) {
+    const item = raw.trim();
+    if (item && !c.memory.some((m) => m.toLowerCase() === item.toLowerCase())) c.memory.push(item);
+  }
+  if (c.memory.length > MEMORY_CAP) c.memory = c.memory.slice(-MEMORY_CAP);
 }
 
 const chats = new Map<string, ChatSession>();
@@ -53,7 +75,14 @@ function msg(role: ChatMessage["role"], text: string, kind: ChatMessage["kind"] 
 
 export function createChat(config?: SessionConfig): { chatId: string } {
   const id = randomUUID();
-  chats.set(id, { id, config, messages: [], memory: [], createdAt: new Date().toISOString() });
+  chats.set(id, {
+    id,
+    config,
+    messages: [],
+    memory: [],
+    state: emptyState(),
+    createdAt: new Date().toISOString(),
+  });
   return { chatId: id };
 }
 
@@ -69,9 +98,10 @@ export function updateChatConfig(id: string, patch: SessionConfig): boolean {
 }
 
 function transcriptOf(c: ChatSession, max = 16): string {
+  const me = nameOf(c.config).toLowerCase();
   return c.messages
     .slice(-max)
-    .map((m) => `[${m.role === "bob" ? "goose" : "broker"}] ${m.text}`)
+    .map((m) => `[${m.role === "bob" ? me : "broker"}] ${m.text}`)
     .join("\n");
 }
 
@@ -99,30 +129,53 @@ export async function sendChatMessage(
     autonomy: autonomyOf(c.config),
     access,
     memory: c.memory,
+    state: c.state,
   });
 
   // Hold onto anything worth remembering across turns.
-  if (decision.remember?.length) {
-    for (const raw of decision.remember) {
-      const item = raw.trim();
-      if (item && !c.memory.some((m) => m.toLowerCase() === item.toLowerCase())) c.memory.push(item);
-    }
-    if (c.memory.length > 24) c.memory = c.memory.slice(-24);
-  }
+  remember(c, decision.remember);
+  applyStateUpdate(c.state, decision.state);
 
   const out: ChatMessage[] = [];
 
   if (decision.action === "tool" && decision.tool?.name) {
+    const call = decision.tool;
+    const args = call.command ?? call.path ?? call.query ?? (call.details ? JSON.stringify(call.details) : "");
     // Announce first (never a silent tool call), then run it, then show the result.
-    if (decision.say?.trim()) out.push(msg("bob", decision.say.trim()));
-    const { text, quote } = await executeTool(decision.tool, access);
+    const announced = decision.say?.trim();
+    if (announced) out.push(msg("bob", announced));
+
+    const { text, quote } = await executeTool(call, access);
+    recordCompletedAction(c.state, `${call.name}(${args}) → ${text.slice(0, 160)}`);
+
     if (quote) {
-      const m = msg("bob", text, "quote", decision.tool.name);
+      const m = msg("bob", text, "quote", call.name);
       m.quote = quote;
       out.push(m);
     } else {
-      out.push(msg("bob", text, "tool", decision.tool.name));
+      out.push(msg("bob", text, "tool", call.name));
     }
+
+    // Same follow-up turn the meeting runner does: put the tool's answer into
+    // Bob's own words and drive the next step, instead of dropping a raw string.
+    const narrated = await narrateToolResult({
+      toolName: call.name,
+      args,
+      result: text,
+      transcript: transcriptOf(c),
+      name: nameOf(c.config),
+      autonomy: autonomyOf(c.config),
+      access,
+      channel: "chat",
+      memory: c.memory,
+      state: c.state,
+      announced,
+    });
+    remember(c, narrated.remember);
+    applyStateUpdate(c.state, narrated.state);
+    const reply = narrated.say.trim();
+    // Skip it only if the model just echoed the raw tool string back.
+    if (reply && reply !== text.trim()) out.push(msg("bob", reply));
   } else {
     const reply = (decision.say || decision.chatMessage || "").trim();
     if (reply) out.push(msg("bob", reply));

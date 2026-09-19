@@ -28,7 +28,7 @@ interface Config {
 }
 
 const DEFAULT_CONFIG: Config = {
-  name: "Reginald",
+  name: "Bob",
   voice: "reginald",
   autonomy: 45,
   confidence: 68,
@@ -392,7 +392,7 @@ export function GooseConfig() {
               value={config.name}
               maxLength={40}
               spellCheck={false}
-              placeholder="Reginald"
+              placeholder="Bob"
               onChange={(e) => set("name", e.target.value)}
             />
             <p className="mt-2 text-[12.5px] leading-relaxed text-fg-muted">

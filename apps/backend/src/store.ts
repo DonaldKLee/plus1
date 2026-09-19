@@ -51,6 +51,15 @@ export interface MeetingDoc {
   notes: string[];
   lines: StoredLine[];
   decisions: StoredDecision[];
+  /** Standing instructions and facts the agent was told to hold onto. */
+  memory?: string[];
+  /** Slot-filling state: active task, collected params, what's still missing. */
+  state?: {
+    activeTask: string;
+    collected: Record<string, string>;
+    missing: string[];
+    completed: string[];
+  };
   lineCount: number;
   /** First substantive thing said — the label for meetings with no purpose. */
   preview?: string;

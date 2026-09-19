@@ -101,6 +101,7 @@ interface Session {
   lastBrainAt?: number;
   lastActionAt?: number;
   quotaNotedAt?: number;
+  remoteStreams?: number; // tapped remote audio streams ≈ other participants
   speakingUntil?: number; // ignore transcript + brain while we're talking
 }
 
@@ -397,11 +398,19 @@ function scheduleBrain(s: Session): void {
 // Cheap local gate so we only spend a Gemini call when a line plausibly needs
 // the goose — a name mention, a question, or a request. Keeps us well within
 // free-tier daily quotas and makes the brain react to real triggers.
-const NAME_RE = /\bplus[\s-]?(one|1)\b/i;
+const NAME_RE = /\bgoose\b/i;
 const REQUEST_RE =
   /\b(can|could|would|will|please|draft|write|send|email|schedule|book|check|look\s?up|find|search|summar|remind|add|create|what('?s| is| are)|who('?s| is)|when|where|how|why|should we|do we)\b/i;
 
+function isOneOnOne(s: Session): boolean {
+  // remoteStreams counts tapped remote audio streams ≈ other participants.
+  // 1 other person → everything they say is directed at the goose.
+  return (s.remoteStreams ?? 0) <= 1;
+}
+
 function worthConsidering(s: Session): boolean {
+  // In a 1:1, the other person is talking to the goose — consider every line.
+  if (isOneOnOne(s)) return true;
   const recent = s.lines.filter((l) => !l.partial && !l.agent).slice(-2);
   const text = recent.map((l) => l.text).join(" ");
   if (!text.trim()) return false;
@@ -412,7 +421,7 @@ function transcriptWindow(s: Session, maxLines = 14): string {
   return s.lines
     .filter((l) => !l.partial)
     .slice(-maxLines)
-    .map((l) => `[${l.agent ? "plus one" : "speaker"}] ${l.text}`)
+    .map((l) => `[${l.agent ? "goose" : "speaker"}] ${l.text}`)
     .join("\n");
 }
 
@@ -428,7 +437,7 @@ async function runBrain(s: Session): Promise<void> {
   s.brainBusy = true;
   s.lastBrainAt = Date.now();
   try {
-    const decision = await decideAction(transcriptWindow(s));
+    const decision = await decideAction(transcriptWindow(s), { oneOnOne: isOneOnOne(s) });
     const record: DecisionRecord = {
       ...decision,
       id: randomUUID(),
@@ -501,7 +510,7 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
     const result = await runTool(d.tool.name, d.tool.query);
     note(s, `Tool result: ${result}`);
     // Share the tool's answer with the room via chat.
-    await postToMeetChat(page, `plus one — ${result}`);
+    await postToMeetChat(page, `goose — ${result}`);
     return `tool: ${result}`;
   }
 
@@ -520,7 +529,11 @@ async function startAudioCapture(page: Page, s: Session): Promise<void> {
   await page.exposeFunction("__plus1Audio", (b64: string, taps: number) => {
     if (taps !== lastTap) {
       lastTap = taps;
-      note(s, `Tapped ${taps} audio stream${taps === 1 ? "" : "s"} in the room.`);
+      s.remoteStreams = taps;
+      note(
+        s,
+        `Tapped ${taps} audio stream${taps === 1 ? "" : "s"} in the room${taps <= 1 ? " — treating as a 1:1, will respond directly." : "."}`,
+      );
     }
     const ws = s.live;
     if (ws && ws.readyState === 1 && s.liveReady) {

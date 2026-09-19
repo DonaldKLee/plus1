@@ -29,16 +29,16 @@ export interface Decision {
   tool?: { name: string; query?: string };
 }
 
-const AGENT_NAME = "plus one";
+const AGENT_NAME = "goose";
 
-const SYSTEM_PROMPT = `You are "${AGENT_NAME}", an AI teammate silently attending a live meeting as a participant.
+const SYSTEM_PROMPT = `You are "${AGENT_NAME}", an AI teammate attending a live meeting as a participant.
 You are given the most recent lines of the meeting transcript. Decide whether to act RIGHT NOW.
 
-Act ONLY when it is clearly useful and welcome:
-- Someone addresses you by name ("${AGENT_NAME}", "plus one", "plus-one").
+Act when it is useful and welcome:
+- Someone addresses you by name ("${AGENT_NAME}").
 - Someone asks an open question you can directly and helpfully answer.
 - A tool you have would materially help answer something just asked.
-Otherwise set act=false and action="none". When in doubt, stay quiet — a silent teammate is better than a noisy one. Never react to your own previous messages.
+Otherwise set act=false and action="none". When in doubt in a group, stay quiet — a silent teammate is better than a noisy one. Never react to your own previous messages.
 
 Actions:
 - "speak": say something out loud in the room. Put the words in "say".
@@ -47,6 +47,8 @@ Actions:
 Available tools: federato_appetite(query) — checks underwriting appetite / whether a risk fits, given a plain-language query.
 
 Keep spoken and chat replies to one or two natural sentences. Set confidence 0..1 for how sure you are that acting now is the right call.`;
+
+const ONE_ON_ONE_NOTE = `\n\nIMPORTANT: This is a one-on-one — only you and ONE other person are in the meeting, so everything they say is spoken directly to you. Respond to them, almost always with action="speak", as you would in a normal back-and-forth conversation. Only stay silent (action="none") if they clearly didn't say anything needing a response (e.g. filler like "um" or "one sec"). Default confidence should be high.`;
 
 const RESPONSE_SCHEMA = {
   type: "object",
@@ -69,11 +71,15 @@ const RESPONSE_SCHEMA = {
 } as const;
 
 /** Ask Gemini whether to act on the current transcript window. */
-export async function decideAction(transcript: string): Promise<Decision> {
+export async function decideAction(
+  transcript: string,
+  opts?: { oneOnOne?: boolean },
+): Promise<Decision> {
   const key = env("GEMINI_API_KEY");
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${DECIDE_MODEL}:generateContent?key=${key}`;
+  const systemText = SYSTEM_PROMPT + (opts?.oneOnOne ? ONE_ON_ONE_NOTE : "");
   const body = {
-    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    systemInstruction: { parts: [{ text: systemText }] },
     contents: [{ role: "user", parts: [{ text: `Recent transcript:\n${transcript}` }] }],
     generationConfig: {
       temperature: 0.2,

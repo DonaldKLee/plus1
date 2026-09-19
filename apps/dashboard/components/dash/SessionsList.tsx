@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Empty, Input } from "@/components/ui";
+import { Empty, Input, cx } from "@/components/ui";
 import {
   STATUS_LABEL,
   fetchSessions,
+  isUnlabelled,
+  meetCode,
+  meetingTitle,
   searchMeetings,
   type SessionStatus,
   type SessionSummary,
@@ -18,10 +21,6 @@ const STATUS_COLOR: Record<SessionStatus, string> = {
   ended: "var(--fg-subtle)",
   error: "var(--alert)",
 };
-
-function meetCode(url: string): string {
-  return url.replace(/^https?:\/\/meet\.google\.com\//i, "").split("?")[0];
-}
 
 function fmtWhen(iso: string): string {
   const d = new Date(iso);
@@ -161,6 +160,9 @@ export function SessionsList({
       <div className="overflow-hidden rounded-[var(--r)] border border-border">
         {rows.map((s) => {
           const duration = fmtDuration(s.durationMs);
+          const title = meetingTitle(s);
+          const code = meetCode(s.meetUrl);
+          const unlabelled = isUnlabelled(s);
           return (
             <Link
               key={s.id}
@@ -172,8 +174,13 @@ export function SessionsList({
                 style={{ color: STATUS_COLOR[s.status] ?? "var(--fg-subtle)" }}
               />
               <div className="min-w-0 flex-1">
-                <p className="tnum truncate text-[13.5px] font-medium text-fg">
-                  {meetCode(s.meetUrl)}
+                <p
+                  className={cx(
+                    "truncate text-[13.5px] font-medium",
+                    unlabelled ? "italic text-fg-muted" : "text-fg",
+                  )}
+                >
+                  {title}
                 </p>
                 <p className="truncate text-[12.5px] text-fg-subtle">
                   {s.snippet ? (
@@ -182,6 +189,7 @@ export function SessionsList({
                     <>
                       {fmtWhen(s.createdAt)}
                       {duration ? ` · ${duration}` : ""}
+                      {title !== code && <span className="tnum"> · {code}</span>}
                     </>
                   )}
                 </p>

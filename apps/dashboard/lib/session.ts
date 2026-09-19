@@ -49,6 +49,10 @@ export interface DecisionRecord {
 export interface SessionSummary {
   id: string;
   meetUrl: string;
+  /** What the meeting is for — the dashboard's label for it. */
+  purpose?: string;
+  /** First substantive line, used as a label when no purpose was given. */
+  preview?: string;
   status: SessionStatus;
   createdAt: string;
   endedAt?: string;
@@ -65,6 +69,7 @@ export interface SessionSummary {
 export interface SessionDetail {
   id: string;
   meetUrl: string;
+  purpose?: string;
   status: SessionStatus;
   createdAt: string;
   endedAt?: string;
@@ -124,12 +129,13 @@ export function activeSessionId(): string | null {
   }
 }
 
-export async function joinMeeting(meetUrl: string): Promise<string> {
-  const config = readGooseConfig();
+export async function joinMeeting(meetUrl: string, purpose?: string): Promise<string> {
+  // Prefer the config stored in MongoDB; fall back to this browser's copy.
+  const config = (await fetchGooseConfig()) ?? readGooseConfig();
   const res = await fetch(`${AGENT_URL}/api/meet/join`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ meetUrl, config }),
+    body: JSON.stringify({ meetUrl, config, purpose }),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error ?? `Agent returned ${res.status}`);
@@ -230,6 +236,76 @@ export function honk(id: string): Promise<void> {
 
 export function streamUrl(id: string): string {
   return `${AGENT_URL}/api/meet/sessions/${id}/stream`;
+}
+
+/** Rename a meeting (live or archived). */
+export async function renameMeeting(id: string, purpose: string): Promise<boolean> {
+  const res = await fetch(`${AGENT_URL}/api/meet/sessions/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ purpose }),
+  }).catch(() => null);
+  return Boolean(res?.ok);
+}
+
+/** The goose config stored in MongoDB, or null when nothing is saved yet. */
+export async function fetchGooseConfig(): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetch(`${AGENT_URL}/api/goose/config`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return (json.config ?? null) as Record<string, unknown> | null;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist the goose config to MongoDB. Returns false if it could not be saved. */
+export async function saveGooseConfig(config: Record<string, unknown>): Promise<boolean> {
+  try {
+    const res = await fetch(`${AGENT_URL}/api/goose/config`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ config }),
+    });
+    if (!res.ok) return false;
+    const json = await res.json().catch(() => ({}));
+    return Boolean(json.saved);
+  } catch {
+    return false;
+  }
+}
+
+/** The Meet room code, e.g. abc-defg-hij. */
+export function meetCode(url: string): string {
+  return url.replace(/^https?:\/\/meet\.google\.com\//i, "").split("?")[0] ?? url;
+}
+
+/**
+ * What to call a meeting in the UI. The operator's stated purpose wins; older
+ * meetings that predate the field fall back to their first transcribed line,
+ * and only then to the raw room code.
+ */
+export function meetingTitle(m: {
+  purpose?: string;
+  preview?: string;
+  meetUrl: string;
+  lines?: { text: string; agent?: boolean }[];
+}): string {
+  const purpose = m.purpose?.trim();
+  if (purpose) return purpose;
+  if (m.preview?.trim()) return m.preview.trim();
+  const firstHuman = m.lines?.find((l) => !l.agent && l.text.trim().split(/\s+/).length >= 4);
+  if (firstHuman) {
+    const t = firstHuman.text.trim();
+    return t.length > 70 ? `${t.slice(0, 70).trimEnd()}…` : t;
+  }
+  return meetCode(m.meetUrl);
+}
+
+/** True when the title is standing in for a real purpose — shown in italics. */
+export function isUnlabelled(m: { purpose?: string }): boolean {
+  return !m.purpose?.trim();
 }
 
 export function fmtClock(ms: number): string {

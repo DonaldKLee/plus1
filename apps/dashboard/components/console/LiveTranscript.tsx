@@ -12,6 +12,9 @@ import {
   interrupt,
   fetchSession,
   leaveSession,
+  meetCode,
+  meetingTitle,
+  renameMeeting,
   speak,
   streamUrl,
   type AvatarState,
@@ -54,6 +57,10 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
   // stream when the session is actually live.
   const [archived, setArchived] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [purpose, setPurpose] = useState<string | undefined>(undefined);
+  const [meetUrl, setMeetUrl] = useState("");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -70,6 +77,8 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
         setLines(s.lines ?? []);
         setDecisions(s.decisions ?? []);
         setArchived(!s.live);
+        setPurpose(s.purpose);
+        setMeetUrl(s.meetUrl);
       } catch {
         /* fall through to the stream */
       } finally {
@@ -130,6 +139,21 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [lines.length, lastLen]);
 
+  const cancelTitle = useRef(false);
+
+  async function commitTitle(e?: React.FormEvent | React.FocusEvent) {
+    e?.preventDefault();
+    if (cancelTitle.current) {
+      cancelTitle.current = false;
+      return;
+    }
+    const next = draftTitle.trim();
+    setEditingTitle(false);
+    if (!next || next === (purpose ?? "")) return;
+    setPurpose(next);
+    await renameMeeting(sessionId, next);
+  }
+
   const live = status === "listening" && !archived;
   const working = (status === "joining" || status === "waiting-admit") && !archived;
   const acted = decisions.filter((d) => d.outcome && d.outcome !== "held" && d.outcome !== "below threshold");
@@ -159,6 +183,52 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
             All meetings
           </Button>
         </Link>
+        <div className="order-last w-full min-w-0 lg:order-none lg:flex-1">
+          {editingTitle ? (
+            <form onSubmit={commitTitle} className="flex items-center gap-2">
+              <Input
+                autoFocus
+                value={draftTitle}
+                maxLength={120}
+                onChange={(e) => setDraftTitle(e.target.value)}
+                // Clicking away keeps the edit — only Escape throws it out.
+                onBlur={commitTitle}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    cancelTitle.current = true;
+                    setEditingTitle(false);
+                  }
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void commitTitle();
+                  }
+                }}
+                className="h-8 max-w-[420px] text-[14px]"
+                aria-label="Meeting purpose"
+              />
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setDraftTitle(purpose ?? "");
+                setEditingTitle(true);
+              }}
+              title="Rename this meeting"
+              className="group flex min-w-0 max-w-full items-baseline gap-2 rounded-[var(--r-sm)] px-1 py-0.5 text-left transition-colors hover:bg-bg-subtle"
+            >
+              <span className="truncate text-[15px] font-semibold tracking-[-0.02em] text-fg">
+                {meetingTitle({ purpose, meetUrl, lines })}
+              </span>
+              {meetUrl && (
+                <span className="tnum shrink-0 text-[12px] text-fg-subtle">
+                  {meetCode(meetUrl)}
+                </span>
+              )}
+            </button>
+          )}
+        </div>
+
         <div className="flex items-center gap-2">
           <span
             className={live ? "dot dot-pulse" : "dot"}

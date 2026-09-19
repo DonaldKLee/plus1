@@ -53,6 +53,13 @@ duration, plus a flattened `transcript` field carrying a text index. The in-memo
 and failures are logged, never fatal. With `MONGODB_URI` unset the whole module no-ops and the
 app behaves exactly as before.
 
+Meetings are labelled by **purpose**, not by the Meet link: the operator types one when sending the
+goose (`POST /api/meet/join` body `purpose`), `PATCH /api/meet/sessions/:id` renames one later
+(live or archived), and unlabelled meetings fall back to `preview` — the first substantive line,
+computed on save. The goose's own settings live in the same database (`settings` collection,
+`_id: "goose"`, `GET`/`PUT /api/goose/config`); the Goose tab treats localStorage as a cache and
+MongoDB as the record, and a session joined without a config loads the saved one.
+
 `listSessions()` / `getSession()` are async and merge live sessions with stored ones, so the
 dashboard shows history across backend restarts and `/app/meetings/[id]` replays a finished
 meeting. Extra endpoints: `GET /api/meet/search?q=`, `GET /api/meet/stats`,

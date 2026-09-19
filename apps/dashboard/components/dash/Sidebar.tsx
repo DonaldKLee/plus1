@@ -4,13 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Wordmark, cx } from "@/components/ui";
-import { Home, History, Persona, Plug, Menu, Close } from "@/components/icons";
+import { Home, History, Persona, Plug, Menu, Close, Shield } from "@/components/icons";
 import { PERSONAS, DEFAULT_PERSONA_ID, ACCENT_VAR, personaById } from "@/lib/personas";
 import { MEETINGS } from "@/lib/meetings";
 
 const NAV = [
   { href: "/app", label: "Home", Icon: Home },
   { href: "/app/meetings", label: "Meetings", Icon: History },
+  { href: "/app/underwrite", label: "Underwrite", Icon: Shield },
   { href: "/app/personas", label: "Personas", Icon: Persona },
   { href: "/app/integrations", label: "Tools", Icon: Plug },
 ];

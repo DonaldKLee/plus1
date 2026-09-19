@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "paths": {
+      "@plus1/brain": ["../../packages/brain/src/index.ts"],
+      "@plus1/brain/*": ["../../packages/brain/src/*"],
+      "@plus1/protocol": ["../../packages/protocol/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*"]
+}

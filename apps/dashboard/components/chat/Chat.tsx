@@ -5,6 +5,7 @@ import Link from "next/link";
 import { GooseMark, Button, Chip, cx } from "@/components/ui";
 import { History, Plug } from "@/components/icons";
 import { createChat, sendChatMessage, type ChatMessage } from "@/lib/chat";
+import { QuoteCard } from "./QuoteCard";
 
 function readConfig(): { name?: string; servers?: Record<string, boolean>; localAccess?: string } {
   if (typeof window === "undefined") return {};
@@ -144,6 +145,13 @@ export function Chat() {
               <div key={m.id} className="flex justify-end">
                 <div className="max-w-[80%] rounded-[var(--r-lg)] rounded-br-[4px] bg-inverse-bg px-3.5 py-2 text-[14px] leading-relaxed text-inverse-fg">
                   {m.text}
+                </div>
+              </div>
+            ) : m.kind === "quote" && m.quote ? (
+              <div key={m.id} className="flex gap-2.5">
+                <GooseMark size={22} className="mt-0.5 shrink-0 text-fg" />
+                <div className="min-w-0 max-w-[92%] flex-1">
+                  <QuoteCard q={m.quote} />
                 </div>
               </div>
             ) : m.kind === "tool" ? (

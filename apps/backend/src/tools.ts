@@ -7,32 +7,53 @@ import { runTool, type Decision, type ToolAccess } from "./agentBrain.js";
 import { runFileTool, READ_TOOLS, WRITE_TOOLS, type FileTool } from "./fileTools.js";
 import { runCommand } from "./shellTools.js";
 import { runFederatoTool } from "./federatoTools.js";
+import { runIntactTool } from "./intactTools.js";
+import type { QuoteResult } from "@plus1/brain";
 
 export type ToolCall = NonNullable<Decision["tool"]>;
 
-/** Run one tool call, gated by the session's access. Returns a result string. */
-export async function executeTool(t: ToolCall, access: ToolAccess): Promise<string> {
-  const name = t.name;
+/** A tool result: a room-ready string, plus structured data when there is any. */
+export interface ToolResult {
+  text: string;
+  quote?: QuoteResult;
+}
+
+const t = (text: string): ToolResult => ({ text });
+
+/** Run one tool call, gated by the session's access. */
+export async function executeTool(call: ToolCall, access: ToolAccess): Promise<ToolResult> {
+  const name = call.name;
 
   if (name.startsWith("federato_")) {
-    if (access.federato === false) return "Federato is turned off right now.";
-    return runFederatoTool(name, { query: t.query }).catch((e: Error) => `Federato error: ${e.message}`);
+    if (access.federato === false) return t("Federato is turned off right now.");
+    return runFederatoTool(name, { query: call.query })
+      .then((text) => t(text))
+      .catch((e: Error) => t(`Federato error: ${e.message}`));
   }
 
-  if (name === "run_command") {
-    if (access.files !== "write") return "i don't have write access to run commands right now.";
-    return runCommand(t.command ?? "").catch((e: Error) => `command error: ${e.message}`);
-  }
-
-  if (READ_TOOLS.includes(name as FileTool) || WRITE_TOOLS.includes(name as FileTool)) {
-    if (access.files === "off") return "local file access is turned off.";
-    if (WRITE_TOOLS.includes(name as FileTool) && access.files !== "write") {
-      return "i only have read access to files right now.";
-    }
-    return runFileTool(name as FileTool, { path: t.path, content: t.content }).catch(
-      (e: Error) => `file error: ${e.message}`,
+  if (name.startsWith("intact_")) {
+    if (!access.intact) return t("Intact isn't connected right now.");
+    return runIntactTool(name, { query: call.query, details: call.details }).catch((e: Error) =>
+      t(`Intact error: ${e.message}`),
     );
   }
 
-  return runTool(name, t.query);
+  if (name === "run_command") {
+    if (access.files !== "write") return t("i don't have write access to run commands right now.");
+    return runCommand(call.command ?? "")
+      .then((text) => t(text))
+      .catch((e: Error) => t(`command error: ${e.message}`));
+  }
+
+  if (READ_TOOLS.includes(name as FileTool) || WRITE_TOOLS.includes(name as FileTool)) {
+    if (access.files === "off") return t("local file access is turned off.");
+    if (WRITE_TOOLS.includes(name as FileTool) && access.files !== "write") {
+      return t("i only have read access to files right now.");
+    }
+    return runFileTool(name as FileTool, { path: call.path, content: call.content })
+      .then((text) => t(text))
+      .catch((e: Error) => t(`file error: ${e.message}`));
+  }
+
+  return t(await runTool(name, call.query));
 }

@@ -1,12 +1,31 @@
 // Client for the backend live-chat endpoints — same brain + tools as a meeting.
 import { AGENT_URL, readGooseConfig } from "./session";
 
+export interface QuoteFactor {
+  label: string;
+  effect: "raises" | "lowers" | "neutral";
+}
+
+export interface QuoteResult {
+  product: "car" | "tenant";
+  currency: "CAD";
+  monthlyLow: number;
+  monthlyHigh: number;
+  annualLow: number;
+  annualHigh: number;
+  recommended: string[];
+  factors: QuoteFactor[];
+  assumptions: string[];
+  disclaimer: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "bob";
-  kind: "text" | "tool";
+  kind: "text" | "tool" | "quote";
   text: string;
   tool?: string;
+  quote?: QuoteResult;
   at: string;
 }
 

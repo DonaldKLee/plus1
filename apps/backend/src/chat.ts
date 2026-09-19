@@ -5,6 +5,7 @@
  *   - a broker asking Bob for help, where Bob can offer to hop on a meeting.
  */
 import { randomUUID } from "node:crypto";
+import type { QuoteResult } from "@plus1/brain";
 import { decideAction, GOOSE_NAME, type ToolAccess } from "./agentBrain.js";
 import { executeTool } from "./tools.js";
 import type { SessionConfig } from "./meetTranscribe.js";
@@ -12,9 +13,10 @@ import type { SessionConfig } from "./meetTranscribe.js";
 export interface ChatMessage {
   id: string;
   role: "user" | "bob";
-  kind: "text" | "tool";
+  kind: "text" | "tool" | "quote";
   text: string;
-  tool?: string; // tool name, when kind === "tool"
+  tool?: string; // tool name, when kind === "tool" | "quote"
+  quote?: QuoteResult; // structured estimate, when kind === "quote"
   at: string;
 }
 
@@ -42,7 +44,7 @@ function toolAccessOf(c?: SessionConfig): ToolAccess {
     : c?.localAccess === "write"
       ? "write"
       : "read";
-  return { federato: servers?.federato !== false, files };
+  return { federato: servers?.federato !== false, intact: servers?.intact === true, files };
 }
 
 function msg(role: ChatMessage["role"], text: string, kind: ChatMessage["kind"] = "text", tool?: string): ChatMessage {
@@ -113,8 +115,14 @@ export async function sendChatMessage(
   if (decision.action === "tool" && decision.tool?.name) {
     // Announce first (never a silent tool call), then run it, then show the result.
     if (decision.say?.trim()) out.push(msg("bob", decision.say.trim()));
-    const result = await executeTool(decision.tool, access);
-    out.push(msg("bob", result, "tool", decision.tool.name));
+    const { text, quote } = await executeTool(decision.tool, access);
+    if (quote) {
+      const m = msg("bob", text, "quote", decision.tool.name);
+      m.quote = quote;
+      out.push(m);
+    } else {
+      out.push(msg("bob", text, "tool", decision.tool.name));
+    }
   } else {
     const reply = (decision.say || decision.chatMessage || "").trim();
     if (reply) out.push(msg("bob", reply));

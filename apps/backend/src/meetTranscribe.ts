@@ -168,6 +168,7 @@ function toolAccessOf(s: Session): ToolAccess {
       : "read";
   return {
     federato: servers?.federato !== false,
+    intact: servers?.intact === true,
     files,
   };
 }
@@ -834,7 +835,7 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
     }
 
     note(s, `Tool: ${t.name}(${t.command ?? t.path ?? t.query ?? ""})`);
-    const result = await executeTool(t, access);
+    const { text: result } = await executeTool(t, access);
     note(s, `Tool result: ${result}`);
     // Share the tool's answer with the room via chat.
     await postToMeetChat(page, `goose — ${result}`);

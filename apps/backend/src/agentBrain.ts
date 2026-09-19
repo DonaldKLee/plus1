@@ -22,13 +22,21 @@ export interface Decision {
   reason: string;
   say?: string;
   chatMessage?: string;
-  tool?: { name: string; query?: string; path?: string; content?: string; command?: string };
+  tool?: {
+    name: string;
+    query?: string;
+    path?: string;
+    content?: string;
+    command?: string;
+    details?: Record<string, unknown>; // structured quote inputs for intact_*
+  };
   remember?: string[];
 }
 
 /** Which tools this session may use. Built from the dashboard Goose config. */
 export interface ToolAccess {
   federato?: boolean;
+  intact?: boolean;
   files?: "off" | "read" | "write";
 }
 
@@ -47,6 +55,22 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
     tools.push({
       name: "federato_account",
       doc: `federato_account(query) — deep-dive ONE account or policy by name or policy number: the appetite decision, the reason, and any red flags / contradictions in the file.`,
+    });
+  }
+  if (access.intact) {
+    // Intact is a Canadian personal & commercial insurer (NOT the "Intacct" accounting app).
+    // These tools quote PERSONAL car + tenant insurance — use them, don't say you only do commercial.
+    tools.push({
+      name: "intact_quote_car",
+      doc: `intact_quote_car — quote PERSONAL car / auto insurance (Intact, the Canadian insurer). This is exactly what to call when someone asks for a car or auto quote — call it immediately, never say you "only do commercial" or "can't quote personal auto". Put whatever you know in tool.details (driverAge, yearsLicensed, atFaultAccidents, tickets, province, city, postal, vehicleYear, vehicleMake, vehicleModel, vehicleValue, annualKm, usage, coverage[basic|standard|full], deductible). Missing fields default sensibly and come back as stated assumptions — so quote as soon as you have a couple of basics and refine after; DON'T interrogate with a long form, and DON'T stall.`,
+    });
+    tools.push({
+      name: "intact_quote_tenant",
+      doc: `intact_quote_tenant — quote TENANT / renter insurance (Intact). Call it when someone asks about renter's/tenant/apartment insurance. tool.details: province, city, postal, dwellingType[apartment|condo|house|basement], contentsValue, liabilityLimit, deductible, priorClaims, hasRoommates. Quote early with defaults, refine after.`,
+    });
+    tools.push({
+      name: "intact_explain",
+      doc: `intact_explain(query) — explain one insurance term or coverage (deductible, liability, comprehensive, replacement cost, water backup…) in a plain, friendly sentence.`,
     });
   }
   if (access.files === "read" || access.files === "write") {
@@ -105,6 +129,8 @@ You are given the most recent lines of the meeting transcript. Decide what to do
 
 Your job is to CATCH MISTAKES and PARTICIPATE — you're here to keep everyone honest and pitch in, not just answer when spoken to. Watch for wrong numbers, claims that contradict something said earlier or something you know, missing steps, and anything that seems off — and jump in when you catch one, briefly, and only when you're fairly sure. When someone hands you a standing instruction ("let us know if you spot mistakes", "remind me to X later", "her name is actually Y", "mute and use the chat"), put a short note in "remember" so you don't lose it once it scrolls away.
 
+What you can actually do is defined by your TOOLS listed below — nothing more, nothing less. If a tool covers what someone asked, USE IT: return action="tool" and call it. Never tell someone you "only do X", "can't help with that", or "don't do that here" when a tool clearly can. And NEVER stall — saying "on it" / "one sec" / "pulling it up" / "looking into it" WITHOUT calling the tool in that same turn is a failure. Call the tool, then give the actual answer. You don't run slow background systems; a tool returns immediately.
+
 Talk like a colleague on a call: warm, brief, lowercase, one or two sentences, contractions. Never sound like a chatbot. Never react to your own previous messages.
 ${memorySection}${mutedNote}
 Act when it is useful and welcome:
@@ -149,16 +175,30 @@ function buildResponseSchema(tools: ToolSpec[]) {
     required: ["act", "action", "confidence", "reason"],
   };
   if (tools.length > 0) {
-    (schema.properties as Record<string, unknown>).tool = {
-      type: "object",
-      properties: {
-        name: { type: "string", enum: tools.map((t) => t.name) },
-        query: { type: "string" },
-        path: { type: "string" },
-        content: { type: "string" },
-        command: { type: "string" },
-      },
+    const toolProps: Record<string, unknown> = {
+      name: { type: "string", enum: tools.map((t) => t.name) },
+      query: { type: "string" },
+      path: { type: "string" },
+      content: { type: "string" },
+      command: { type: "string" },
     };
+    if (tools.some((t) => t.name.startsWith("intact_"))) {
+      const num = { type: "number" };
+      const str = { type: "string" };
+      toolProps.details = {
+        type: "object",
+        properties: {
+          product: { type: "string", enum: ["car", "tenant"] },
+          driverAge: num, yearsLicensed: num, atFaultAccidents: num, tickets: num,
+          province: str, city: str, postal: str,
+          vehicleYear: num, vehicleMake: str, vehicleModel: str, vehicleValue: num,
+          annualKm: num, usage: str, coverage: str, deductible: num,
+          dwellingType: str, contentsValue: num, liabilityLimit: num, priorClaims: num,
+          hasRoommates: { type: "boolean" },
+        },
+      };
+    }
+    (schema.properties as Record<string, unknown>).tool = { type: "object", properties: toolProps };
   }
   return schema;
 }

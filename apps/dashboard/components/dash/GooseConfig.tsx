@@ -78,7 +78,7 @@ const SERVERS: { id: ServerId; name: string; monogram: string; summary: string }
     monogram: "F",
     summary: "Underwriting appetite and submissions — schema discovery, query planning, per-policy scoring.",
   },
-  { id: "intact", name: "Intact", monogram: "I", summary: "Carrier data and policy lookups from Intact." },
+  { id: "intact", name: "Intact", monogram: "I", summary: "Conversational car + tenant insurance quoting — Bob gathers what's needed and returns an estimate with coverage recommendations." },
   {
     id: "local",
     name: "Local access",

@@ -6,6 +6,7 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "concurrently -n agent,web -c cyan,magenta \"npm run federato\" \"npm run dashboard\"",
     "dashboard": "npm run dev -w @plus1/dashboard",
     "federato": "npm run dev -w @plus1/federato-agent",
     "federato:rank": "npm run rank -w @plus1/federato-agent",
@@ -13,5 +14,8 @@
     "federato:screenshare": "npm run screenshare -w @plus1/federato-agent",
     "federato:google-login": "npm run google-login -w @plus1/federato-agent",
     "test:brain": "npm run test -w @plus1/brain"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
   }
 }

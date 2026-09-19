@@ -17,6 +17,23 @@ export interface TranscriptLine {
   at: string; // ISO wall clock
   text: string;
   partial?: boolean; // still being spoken
+  agent?: boolean; // the goose's own voice
+}
+
+export type ActionKind = "speak" | "chat" | "tool" | "none";
+
+export interface DecisionRecord {
+  id: string;
+  t: number;
+  at: string;
+  act: boolean;
+  action: ActionKind;
+  confidence: number;
+  reason: string;
+  say?: string;
+  chatMessage?: string;
+  tool?: { name: string; query?: string };
+  outcome?: string;
 }
 
 export interface SessionSummary {

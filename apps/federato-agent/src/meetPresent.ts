@@ -209,7 +209,12 @@ async function dumpMeetDebug(page: Page, notes: string[]): Promise<void> {
   }
 }
 
-export async function joinMeet(page: Page, notes: string[]): Promise<boolean> {
+export async function joinMeet(
+  page: Page,
+  notes: string[],
+  opts?: { muted?: boolean },
+): Promise<boolean> {
+  const muted = opts?.muted !== false; // default: join muted
   await page.waitForLoadState("domcontentloaded");
   await waitForGoogleSession(page, notes);
   await page.waitForTimeout(2500);
@@ -223,11 +228,16 @@ export async function joinMeet(page: Page, notes: string[]): Promise<boolean> {
     notes.push("Signed-in Meet prejoin (no guest name field).");
   }
 
-  // Mute before joining — try the buttons, then fall back to Meet's keyboard
-  // shortcuts (⌘/Ctrl+D mic, ⌘/Ctrl+E camera) so nobody has to click.
+  // Camera always off. Mic off only if requested — the goose joins unmuted so
+  // it can speak (its BlackHole mic is silent until it plays a reply).
   const mods = process.platform === "darwin" ? "Meta" : "Control";
-  if (!(await clickNamed(page, /turn off (microphone|mic)/i, 1200))) {
-    await page.keyboard.press(`${mods}+d`).catch(() => {});
+  if (muted) {
+    if (!(await clickNamed(page, /turn off (microphone|mic)/i, 1200))) {
+      await page.keyboard.press(`${mods}+d`).catch(() => {});
+    }
+    notes.push("Joined muted.");
+  } else {
+    notes.push("Joining unmuted so the goose can speak.");
   }
   if (!(await clickNamed(page, /turn off camera/i, 1200))) {
     await page.keyboard.press(`${mods}+e`).catch(() => {});

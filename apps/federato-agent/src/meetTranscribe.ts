@@ -13,6 +13,21 @@ import type { Response } from "express";
 import type { BrowserContext, Page } from "playwright-core";
 import { env } from "./env.js";
 import { joinMeet, launchMeetChrome } from "./meetPresent.js";
+import {
+  decideAction,
+  elevenLabsConfigured,
+  postToMeetChat,
+  runTool,
+  speakIntoMeet,
+  type Decision,
+} from "./agentBrain.js";
+
+// Auto-act tuning.
+const CONFIDENCE_THRESHOLD = Number(process.env.BRAIN_CONFIDENCE ?? 0.7);
+const ACTION_COOLDOWN_MS = 9000; // min gap between the goose acting
+const BRAIN_DEBOUNCE_MS = 700; // wait for the line to settle before deciding
+const BRAIN_MIN_INTERVAL_MS = 4000; // cap how often we call Gemini to read the room
+const SPEAK_TAIL_MS = 1500; // ignore transcript for a bit after we speak
 
 // esbuild (via tsx) rewrites `function foo(){}` as `__name(function foo(){}, "foo")`.
 // That helper lives in the Node module, not the page, so any function we inject
@@ -53,6 +68,14 @@ export interface TranscriptLine {
   at: string; // ISO wall clock
   text: string;
   partial?: boolean; // true while the line is still being spoken
+  agent?: boolean; // the goose's own voice, heard back through the mic loop
+}
+
+export interface DecisionRecord extends Decision {
+  id: string;
+  t: number;
+  at: string;
+  outcome?: string; // what actually happened when we acted
 }
 
 interface Session {
@@ -70,6 +93,15 @@ interface Session {
   liveReady?: boolean;
   currentLineId?: string; // the line currently being built from the stream
   gapTimer?: ReturnType<typeof setTimeout>;
+  // Brain / auto-act state.
+  page?: Page; // the Meet tab, for chat + speak actions
+  decisions: DecisionRecord[];
+  brainTimer?: ReturnType<typeof setTimeout>;
+  brainBusy?: boolean;
+  lastBrainAt?: number;
+  lastActionAt?: number;
+  quotaNotedAt?: number;
+  speakingUntil?: number; // ignore transcript + brain while we're talking
 }
 
 const sessions = new Map<string, Session>();
@@ -137,6 +169,7 @@ export function getSession(id: string) {
     error: s.error,
     notes: s.notes,
     lines: s.lines,
+    decisions: s.decisions,
   };
 }
 
@@ -153,6 +186,7 @@ export function subscribe(id: string, res: Response): boolean {
   // Catch the client up to the current state.
   write("status", { status: s.status, error: s.error, notes: s.notes });
   for (const line of s.lines) write("line", line);
+  for (const d of s.decisions) write("decision", d);
 
   const onEvent = (msg: { event: string; data: unknown }) => {
     write(msg.event, msg.data);
@@ -177,6 +211,7 @@ export function startMeetTranscription(meetUrl: string): { sessionId: string } {
     createdAt: new Date().toISOString(),
     notes: [],
     lines: [],
+    decisions: [],
     bus: new EventEmitter(),
   };
   session.bus.setMaxListeners(50);
@@ -221,11 +256,12 @@ async function runSession(s: Session): Promise<void> {
   await context.addInitScript({ content: NAME_SHIM });
 
   const page = context.pages()[0] ?? (await context.newPage());
+  s.page = page;
   await page.goto(s.meetUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
   note(s, `Opened Meet ${s.meetUrl}`);
   setStatus(s, "joining");
 
-  const joined = await joinMeet(page, s.notes);
+  const joined = await joinMeet(page, s.notes, { muted: false });
   if (!joined) {
     setStatus(s, "error", s.notes[s.notes.length - 1] ?? "Could not join the meeting.");
     await closeContext(s); // quit the Chrome window if we couldn't get in
@@ -234,6 +270,9 @@ async function runSession(s: Session): Promise<void> {
   note(s, "Joined the meeting.");
 
   s.startedAt = Date.now();
+  if (!elevenLabsConfigured()) {
+    note(s, "No ELEVENLABS_API_KEY set — the goose can chat and use tools, but can't speak aloud yet.");
+  }
   openLive(s);
   await startAudioCapture(page, s);
   setStatus(s, "listening");
@@ -339,7 +378,139 @@ function finalizeLine(s: Session): void {
   s.currentLineId = undefined;
   if (!line) return;
   line.partial = false;
+  // Words captured while (or just after) the goose spoke are its own voice
+  // looping back through the mic — mark them and don't let the brain react.
+  const speaking = s.speakingUntil ? Date.now() < s.speakingUntil + SPEAK_TAIL_MS : false;
+  if (speaking) line.agent = true;
   emit(s, "line", line);
+
+  if (!line.agent) scheduleBrain(s);
+}
+
+// ── Brain: decide + act on the settled transcript ──────────────────────────
+
+function scheduleBrain(s: Session): void {
+  if (s.brainTimer) clearTimeout(s.brainTimer);
+  s.brainTimer = setTimeout(() => void runBrain(s), BRAIN_DEBOUNCE_MS);
+}
+
+// Cheap local gate so we only spend a Gemini call when a line plausibly needs
+// the goose — a name mention, a question, or a request. Keeps us well within
+// free-tier daily quotas and makes the brain react to real triggers.
+const NAME_RE = /\bplus[\s-]?(one|1)\b/i;
+const REQUEST_RE =
+  /\b(can|could|would|will|please|draft|write|send|email|schedule|book|check|look\s?up|find|search|summar|remind|add|create|what('?s| is| are)|who('?s| is)|when|where|how|why|should we|do we)\b/i;
+
+function worthConsidering(s: Session): boolean {
+  const recent = s.lines.filter((l) => !l.partial && !l.agent).slice(-2);
+  const text = recent.map((l) => l.text).join(" ");
+  if (!text.trim()) return false;
+  return NAME_RE.test(text) || text.includes("?") || REQUEST_RE.test(text);
+}
+
+function transcriptWindow(s: Session, maxLines = 14): string {
+  return s.lines
+    .filter((l) => !l.partial)
+    .slice(-maxLines)
+    .map((l) => `[${l.agent ? "plus one" : "speaker"}] ${l.text}`)
+    .join("\n");
+}
+
+async function runBrain(s: Session): Promise<void> {
+  if (s.status !== "listening" || s.brainBusy) return;
+  if (s.speakingUntil && Date.now() < s.speakingUntil) return;
+  if (s.lastActionAt && Date.now() - s.lastActionAt < ACTION_COOLDOWN_MS) return;
+  // Cap Gemini read frequency to stay within rate limits on busy meetings.
+  if (s.lastBrainAt && Date.now() - s.lastBrainAt < BRAIN_MIN_INTERVAL_MS) return;
+  // Only consult the LLM when a line actually looks actionable.
+  if (!worthConsidering(s)) return;
+
+  s.brainBusy = true;
+  s.lastBrainAt = Date.now();
+  try {
+    const decision = await decideAction(transcriptWindow(s));
+    const record: DecisionRecord = {
+      ...decision,
+      id: randomUUID(),
+      t: s.startedAt ? Date.now() - s.startedAt : 0,
+      at: new Date().toISOString(),
+    };
+
+    const willAct =
+      decision.act &&
+      decision.action !== "none" &&
+      decision.confidence >= CONFIDENCE_THRESHOLD;
+
+    if (willAct) {
+      record.outcome = "acting";
+      s.decisions.push(record);
+      emit(s, "decision", record);
+      s.lastActionAt = Date.now();
+      record.outcome = await executeDecision(s, decision);
+      emit(s, "decision", record); // update with the real outcome
+    } else {
+      // Still surface the reasoning so the operator sees the goose thinking.
+      record.outcome = decision.action === "none" ? "held" : "below threshold";
+      s.decisions.push(record);
+      emit(s, "decision", record);
+    }
+  } catch (e) {
+    const err = e as Error & { transient?: boolean; quota?: boolean };
+    if (err.quota) {
+      // Daily free-tier quota gone — surface it once so it's never silent.
+      if (!s.quotaNotedAt || Date.now() - s.quotaNotedAt > 60_000) {
+        s.quotaNotedAt = Date.now();
+        note(
+          s,
+          "Gemini brain quota exhausted for today (free tier). Enable billing on the key, or set GEMINI_BRAIN_MODEL to another model.",
+        );
+      }
+    } else if (err.transient) {
+      // Gemini was momentarily overloaded — skip this read, try the next line.
+      console.log(`[goose ${s.id.slice(0, 8)}] brain busy, skipping: ${err.message}`);
+    } else {
+      note(s, `brain error: ${err.message}`);
+    }
+  } finally {
+    s.brainBusy = false;
+  }
+}
+
+async function executeDecision(s: Session, d: Decision): Promise<string> {
+  const page = s.page;
+  if (!page) return "no page";
+
+  if (d.action === "chat" && d.chatMessage) {
+    note(s, `Posting to chat: "${d.chatMessage}"`);
+    const ok = await postToMeetChat(page, d.chatMessage);
+    return ok ? "posted to chat" : "chat send failed";
+  }
+
+  if (d.action === "speak" && d.say) {
+    note(s, `Speaking: "${d.say}"`);
+    // Reserve a speaking window so we ignore our own voice in the transcript.
+    s.speakingUntil = Date.now() + estimateSpeechMs(d.say);
+    const res = await speakIntoMeet(page, d.say);
+    s.speakingUntil = Date.now() + 800; // small tail after playback finishes
+    note(s, res.note);
+    return res.ok ? (res.routedIntoMeet ? "spoke into meeting" : "spoke locally") : `speak failed: ${res.note}`;
+  }
+
+  if (d.action === "tool" && d.tool?.name) {
+    note(s, `Calling tool: ${d.tool.name}(${d.tool.query ?? ""})`);
+    const result = await runTool(d.tool.name, d.tool.query);
+    note(s, `Tool result: ${result}`);
+    // Share the tool's answer with the room via chat.
+    await postToMeetChat(page, `plus one — ${result}`);
+    return `tool: ${result}`;
+  }
+
+  return "nothing to do";
+}
+
+function estimateSpeechMs(text: string): number {
+  // ~15 characters per second of speech, min 2s.
+  return Math.max(2000, Math.ceil(text.length / 15) * 1000);
 }
 
 async function startAudioCapture(page: Page, s: Session): Promise<void> {

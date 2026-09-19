@@ -19,12 +19,20 @@ import {
   listSessions,
   speakInSession,
   startMeetTranscription,
+  renameSession,
   stopSession,
   subscribe,
   updateSessionConfig,
 } from "./meetTranscribe.js";
 import { createChat, getChat, sendChatMessage, updateChatConfig } from "./chat.js";
-import { deleteMeeting, meetingStats, searchMeetings, storeEnabled } from "./store.js";
+import {
+  deleteMeeting,
+  getGooseSettings,
+  meetingStats,
+  saveGooseSettings,
+  searchMeetings,
+  storeEnabled,
+} from "./store.js";
 
 const app = express();
 const configuredOrigin = envOptional("DASHBOARD_ORIGIN") ?? "http://localhost:3000";
@@ -155,7 +163,8 @@ app.post("/api/meet/join", (req, res) => {
     return;
   }
   const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : undefined;
-  const { sessionId } = startMeetTranscription(meetUrl, config);
+  const purpose = typeof req.body?.purpose === "string" ? req.body.purpose : undefined;
+  const { sessionId } = startMeetTranscription(meetUrl, config, purpose);
   res.json({ sessionId });
 });
 
@@ -196,6 +205,17 @@ app.get("/api/meet/sessions/:id", async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
+});
+
+// Relabel a meeting — works for live sessions and stored ones alike.
+app.patch("/api/meet/sessions/:id", async (req, res) => {
+  const purpose = typeof req.body?.purpose === "string" ? req.body.purpose : "";
+  const ok = await renameSession(req.params.id, purpose);
+  if (!ok) {
+    res.status(404).json({ error: "No such session" });
+    return;
+  }
+  res.json({ ok: true, purpose: purpose.trim() });
 });
 
 app.delete("/api/meet/sessions/:id", async (req, res) => {
@@ -242,6 +262,30 @@ app.post("/api/meet/sessions/:id/config", gooseRoute((id, b) => {
   if (!ok) throw new Error("No such session");
   return { ok: true };
 }));
+
+// ── Goose settings, stored in MongoDB so they follow the goose ─────────────
+app.get("/api/goose/config", async (_req, res) => {
+  try {
+    res.json({ config: await getGooseSettings(), store: storeEnabled() ? "mongodb" : "memory" });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+app.put("/api/goose/config", async (req, res) => {
+  const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : req.body;
+  if (!config || typeof config !== "object") {
+    res.status(400).json({ error: "Expected a config object" });
+    return;
+  }
+  try {
+    const saved = await saveGooseSettings(config as Record<string, unknown>);
+    // No database configured is not an error: the tab keeps its local copy.
+    res.json({ ok: true, saved, store: storeEnabled() ? "mongodb" : "memory" });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
 
 // ── Live chat with the goose (no meeting) ───────────────────────────────────
 app.post("/api/chat/sessions", (req, res) => {

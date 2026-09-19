@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Panel, PanelHead, Input, GooseMark, Chip, Dot, Button, cx } from "@/components/ui";
 import { Shield, Plug, PageMark, Check, Plus } from "@/components/icons";
-import { activeSessionId, updateSessionConfig } from "@/lib/session";
+import {
+  activeSessionId,
+  fetchGooseConfig,
+  saveGooseConfig,
+  updateSessionConfig,
+} from "@/lib/session";
 
 /* --------------------------------------------------------------- model ---- */
 
@@ -36,19 +41,24 @@ const DEFAULT_CONFIG: Config = {
 
 const STORAGE_KEY = "plus1.goose.config";
 
+/** Fill in anything a stored config is missing, whatever its source. */
+function normalize(p: Partial<Config>): Config {
+  return {
+    ...DEFAULT_CONFIG,
+    ...p,
+    guardrails: { ...DEFAULT_CONFIG.guardrails, ...(p.guardrails ?? {}) },
+    servers: { ...DEFAULT_CONFIG.servers, ...(p.servers ?? {}) },
+    localAccess: p.localAccess === "write" ? "write" : "read",
+  };
+}
+
+/** This browser's cached copy — the instant paint, before MongoDB answers. */
 function loadConfig(): Config {
   if (typeof window === "undefined") return DEFAULT_CONFIG;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_CONFIG;
-    const p = JSON.parse(raw) as Partial<Config>;
-    return {
-      ...DEFAULT_CONFIG,
-      ...p,
-      guardrails: { ...DEFAULT_CONFIG.guardrails, ...(p.guardrails ?? {}) },
-      servers: { ...DEFAULT_CONFIG.servers, ...(p.servers ?? {}) },
-      localAccess: p.localAccess === "write" ? "write" : "read",
-    };
+    return normalize(JSON.parse(raw) as Partial<Config>);
   } catch {
     return DEFAULT_CONFIG;
   }
@@ -277,12 +287,27 @@ export function GooseConfig() {
   const [saved, setSaved] = useState(false);
   const [live, setLive] = useState(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const liveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const firstPersist = useRef(true);
 
+  const [remote, setRemote] = useState(false);
+
   useEffect(() => {
+    let alive = true;
+    // Paint this browser's cached copy immediately, then let MongoDB win.
     setConfig(loadConfig());
-    setReady(true);
+    (async () => {
+      const stored = await fetchGooseConfig();
+      if (alive && stored) {
+        setConfig(normalize(stored as Partial<Config>));
+        setRemote(true);
+      }
+      if (alive) setReady(true);
+    })();
+    return () => {
+      alive = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -293,13 +318,20 @@ export function GooseConfig() {
       return;
     }
     try {
+      // Local copy is the cache; MongoDB is the record.
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-      setSaved(true);
-      if (savedTimer.current) clearTimeout(savedTimer.current);
-      savedTimer.current = setTimeout(() => setSaved(false), 1500);
     } catch {
       /* storage unavailable — the tab still works for this session */
     }
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      void saveGooseConfig(config as unknown as Record<string, unknown>).then((ok) => {
+        setRemote(ok);
+        setSaved(true);
+        if (savedTimer.current) clearTimeout(savedTimer.current);
+        savedTimer.current = setTimeout(() => setSaved(false), 1500);
+      });
+    }, 400);
     // If a meeting is live, push the change to it (debounced), so settings tune
     // the goose mid-meeting — no rejoin needed.
     const sid = activeSessionId();
@@ -337,7 +369,7 @@ export function GooseConfig() {
       {(saved || live) && (
         <div className="rise-in fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-[var(--r-sm)] border border-border bg-bg-subtle px-3 py-2 text-[12.5px] text-fg-muted shadow-sm">
           <Dot color="var(--live)" pulse={live} />
-          {live ? "Applied to live meeting" : "Saved"}
+          {live ? "Applied to live meeting" : remote ? "Saved to MongoDB" : "Saved in this browser"}
         </div>
       )}
 
@@ -550,7 +582,10 @@ export function GooseConfig() {
       </Panel>
 
       <p className="text-[12.5px] text-fg-subtle">
-        Saved in this browser. These settings tell the goose how to behave and which tools it may use in a meeting.
+        {remote
+          ? "Stored in MongoDB, so they follow the goose across browsers and restarts."
+          : "Stored in this browser — set MONGODB_URI on the backend to keep them with the goose."}{" "}
+        These settings tell the goose how to behave and which tools it may use in a meeting.
       </p>
     </div>
   );

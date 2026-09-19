@@ -21,7 +21,15 @@ import { env, envOptional } from "./env.js";
 import { joinMeet, launchMeetChrome } from "./meetPresent.js";
 import { GOOSE_NAME, decideAction, postToMeetChat, type Decision, type ToolAccess } from "./agentBrain.js";
 import { executeTool } from "./tools.js";
-import { getMeeting, listMeetings, saveMeeting, storeEnabled } from "./store.js";
+import {
+  getGooseSettings,
+  getMeeting,
+  listMeetings,
+  previewOf,
+  saveMeeting,
+  setMeetingPurpose,
+  storeEnabled,
+} from "./store.js";
 
 /** Ignore transcription fragments this soon after the goose stopped: they're often its own tail. */
 const BARGE_IN_GUARD_MS = 400;
@@ -91,6 +99,7 @@ export interface DecisionRecord extends Decision {
 interface Session {
   id: string;
   meetUrl: string;
+  purpose?: string; // what the meeting is for — the dashboard's label for it
   status: SessionStatus;
   createdAt: string;
   startedAt?: number; // Date.now() when listening began
@@ -178,6 +187,7 @@ function toDoc(s: Session) {
   return {
     _id: s.id,
     meetUrl: s.meetUrl,
+    purpose: s.purpose,
     status: s.status,
     createdAt: s.createdAt,
     endedAt,
@@ -257,6 +267,8 @@ function summarize(s: Session) {
   return {
     id: s.id,
     meetUrl: s.meetUrl,
+    purpose: s.purpose,
+    preview: previewOf(s.lines.filter((l) => !l.partial)),
     status: s.status,
     createdAt: s.createdAt,
     durationMs: s.startedAt ? Date.now() - s.startedAt : undefined,
@@ -288,6 +300,7 @@ export async function getSession(id: string) {
     return {
       id: s.id,
       meetUrl: s.meetUrl,
+      purpose: s.purpose,
       status: s.status,
       createdAt: s.createdAt,
       error: s.error,
@@ -302,6 +315,7 @@ export async function getSession(id: string) {
   return {
     id: doc._id,
     meetUrl: doc.meetUrl,
+    purpose: doc.purpose,
     status: doc.status,
     createdAt: doc.createdAt,
     endedAt: doc.endedAt,
@@ -344,11 +358,16 @@ export function subscribe(id: string, res: Response): boolean {
 }
 
 /** Kick off a join + transcription session; returns immediately. */
-export function startMeetTranscription(meetUrl: string, config?: SessionConfig): { sessionId: string } {
+export function startMeetTranscription(
+  meetUrl: string,
+  config?: SessionConfig,
+  purpose?: string,
+): { sessionId: string } {
   const id = randomUUID();
   const session: Session = {
     id,
     meetUrl,
+    purpose: purpose?.trim() || undefined,
     status: "joining",
     createdAt: new Date().toISOString(),
     notes: [],
@@ -387,6 +406,21 @@ export function updateSessionConfig(id: string, patch: SessionConfig): boolean {
   return true;
 }
 
+/**
+ * Relabel a meeting. Updates the live session when it is still running (which
+ * re-persists it) and the stored document otherwise, so renaming works for
+ * past meetings too.
+ */
+export async function renameSession(id: string, purpose: string): Promise<boolean> {
+  const s = sessions.get(id);
+  if (s) {
+    s.purpose = purpose.trim() || undefined;
+    persist(s, true);
+    return true;
+  }
+  return setMeetingPurpose(id, purpose);
+}
+
 export async function stopSession(id: string): Promise<boolean> {
   const s = sessions.get(id);
   if (!s) return false;
@@ -396,6 +430,16 @@ export async function stopSession(id: string): Promise<boolean> {
 }
 
 async function runSession(s: Session): Promise<void> {
+  // No config from the dashboard (e.g. a curl join, or a fresh browser)? Use
+  // whatever the Goose tab last saved to MongoDB.
+  if (!s.config) {
+    const stored = (await getGooseSettings()) as SessionConfig | null;
+    if (stored) {
+      s.config = stored;
+      note(s, `Loaded saved goose settings (name=${nameOf(s)}, autonomy=${autonomyOf(s)}).`);
+    }
+  }
+
   const context = await launchMeetChrome();
   s.context = context;
 

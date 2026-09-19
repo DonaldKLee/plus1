@@ -40,6 +40,8 @@ export interface MeetingDoc {
   _id: string; // the session id
   meetUrl: string;
   meetCode: string;
+  /** What the meeting is for, typed by the operator when sending the goose. */
+  purpose?: string;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -50,11 +52,16 @@ export interface MeetingDoc {
   lines: StoredLine[];
   decisions: StoredDecision[];
   lineCount: number;
+  /** First substantive thing said — the label for meetings with no purpose. */
+  preview?: string;
   /** Flattened transcript, so Atlas can text-index the whole conversation. */
   transcript: string;
 }
 
 const COLLECTION = "meetings";
+const SETTINGS = "settings";
+/** Single settings document: there is one goose per deployment. */
+const GOOSE_SETTINGS_ID = "goose";
 
 let client: MongoClient | null = null;
 let dbPromise: Promise<Db> | null = null;
@@ -80,11 +87,9 @@ async function db(): Promise<Db | null> {
       await client.connect();
       const database = client.db(envOptional("MONGODB_DB") ?? "plus1");
       const meetings = database.collection<MeetingDoc>(COLLECTION);
-      // Recent-first listing, plus full-text search over the transcript.
+      // Recent-first listing, plus full-text search over purpose + transcript.
       await meetings.createIndex({ createdAt: -1 }).catch(() => {});
-      await meetings
-        .createIndex({ transcript: "text", meetCode: "text" }, { name: "transcript_text" })
-        .catch(() => {});
+      await ensureTextIndex(meetings);
       console.log(`[store] connected to MongoDB (db: ${database.databaseName})`);
       return database;
     })().catch((e) => {
@@ -93,6 +98,29 @@ async function db(): Promise<Db | null> {
     });
   }
   return dbPromise;
+}
+
+/**
+ * Mongo refuses to change a text index's keys under the same name, so when the
+ * shape changes (adding `purpose`) drop the old one and rebuild. Only one text
+ * index per collection is allowed, which is why this has to be a replace.
+ */
+async function ensureTextIndex(col: Collection<MeetingDoc>): Promise<void> {
+  const keys = { purpose: "text", transcript: "text", meetCode: "text" } as const;
+  try {
+    await col.createIndex(keys, { name: "transcript_text" });
+  } catch (e) {
+    const code = (e as { code?: number }).code;
+    // 85 IndexOptionsConflict, 86 IndexKeySpecsConflict — an older shape exists.
+    if (code !== 85 && code !== 86) return;
+    try {
+      await col.dropIndex("transcript_text");
+      await col.createIndex(keys, { name: "transcript_text" });
+      console.log("[store] rebuilt the transcript text index to include purpose");
+    } catch (inner) {
+      console.warn(`[store] could not rebuild text index: ${(inner as Error).message}`);
+    }
+  }
 }
 
 async function meetings(): Promise<Collection<MeetingDoc> | null> {
@@ -115,18 +143,29 @@ async function safe<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
   }
 }
 
+/** The first human line long enough to describe the meeting, truncated. */
+export function previewOf(lines: { text: string; agent?: boolean }[]): string | undefined {
+  const first = lines.find((l) => !l.agent && l.text.trim().split(/\s+/).length >= 4);
+  if (!first) return undefined;
+  const t = first.text.trim();
+  return t.length > 80 ? `${t.slice(0, 80).trimEnd()}…` : t;
+}
+
 export function meetCodeOf(url: string): string {
   return url.replace(/^https?:\/\/meet\.google\.com\//i, "").split("?")[0] ?? url;
 }
 
 /** Write the whole session document (upsert). Called on create and on flush. */
-export async function saveMeeting(doc: Omit<MeetingDoc, "updatedAt" | "transcript" | "meetCode" | "lineCount">): Promise<void> {
+export async function saveMeeting(
+  doc: Omit<MeetingDoc, "updatedAt" | "transcript" | "meetCode" | "lineCount" | "preview">,
+): Promise<void> {
   const col = await meetings();
   if (!col) return;
   const full: MeetingDoc = {
     ...doc,
     meetCode: meetCodeOf(doc.meetUrl),
     lineCount: doc.lines.length,
+    preview: previewOf(doc.lines),
     transcript: doc.lines.map((l) => (l.speaker ? `${l.speaker}: ${l.text}` : l.text)).join("\n"),
     updatedAt: new Date().toISOString(),
   };
@@ -138,6 +177,8 @@ export async function saveMeeting(doc: Omit<MeetingDoc, "updatedAt" | "transcrip
 export interface MeetingSummary {
   id: string;
   meetUrl: string;
+  purpose?: string;
+  preview?: string;
   status: string;
   createdAt: string;
   endedAt?: string;
@@ -153,6 +194,8 @@ function toSummary(d: MeetingDoc): MeetingSummary {
   return {
     id: d._id,
     meetUrl: d.meetUrl,
+    purpose: d.purpose,
+    preview: d.preview,
     status: d.status,
     createdAt: d.createdAt,
     endedAt: d.endedAt,
@@ -180,6 +223,19 @@ export async function getMeeting(id: string): Promise<MeetingDoc | null> {
   const col = await meetings();
   if (!col) return null;
   return (await safe("getMeeting", () => col.findOne({ _id: id }))) ?? null;
+}
+
+/** Rename a stored meeting (the operator relabelling it after the fact). */
+export async function setMeetingPurpose(id: string, purpose: string): Promise<boolean> {
+  const col = await meetings();
+  if (!col) return false;
+  const r = await safe("setMeetingPurpose", () =>
+    col.updateOne(
+      { _id: id },
+      { $set: { purpose: purpose.trim(), updatedAt: new Date().toISOString() } },
+    ),
+  );
+  return Boolean(r?.matchedCount);
 }
 
 export async function deleteMeeting(id: string): Promise<boolean> {
@@ -254,6 +310,42 @@ export async function meetingStats(): Promise<{
     gooseLines: gooseRows?.[0]?.gooseLines ?? 0,
     totalDurationMs: r?.totalDurationMs ?? 0,
   };
+}
+
+// ── Goose settings ────────────────────────────────────────────────────────
+// The Goose tab used to keep its config in localStorage, so it lived in one
+// browser and the backend only saw it when a meeting started. Stored here it
+// follows the goose across browsers and restarts, and a session that joins
+// without an explicit config picks these up.
+
+export interface GooseSettingsDoc {
+  _id: string;
+  config: Record<string, unknown>;
+  updatedAt: string;
+}
+
+/** The saved goose config, or null when nothing is stored yet. */
+export async function getGooseSettings(): Promise<Record<string, unknown> | null> {
+  const database = await db().catch(() => null);
+  if (!database) return null;
+  const doc = await safe("getGooseSettings", () =>
+    database.collection<GooseSettingsDoc>(SETTINGS).findOne({ _id: GOOSE_SETTINGS_ID }),
+  );
+  return doc?.config ?? null;
+}
+
+/** Replace the saved goose config. Returns false when there is no database. */
+export async function saveGooseSettings(config: Record<string, unknown>): Promise<boolean> {
+  const database = await db().catch(() => null);
+  if (!database) return false;
+  const r = await safe("saveGooseSettings", () =>
+    database.collection<GooseSettingsDoc>(SETTINGS).updateOne(
+      { _id: GOOSE_SETTINGS_ID },
+      { $set: { config, updatedAt: new Date().toISOString() } },
+      { upsert: true },
+    ),
+  );
+  return Boolean(r);
 }
 
 export async function closeStore(): Promise<void> {

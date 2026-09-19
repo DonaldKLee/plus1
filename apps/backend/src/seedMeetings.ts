@@ -33,10 +33,11 @@ function lines(texts: [string, boolean][], startedAt: number) {
 
 async function seed(): Promise<void> {
   const now = Date.now();
-  const fixtures: [string, string, number, number, [string, boolean][]][] = [
+  const fixtures: [string, string, string, number, number, [string, boolean][]][] = [
     [
       "seed-tampa",
       "abc-defg-hij",
+      "Tampa warehouse submission review",
       now - 2 * 86_400_000,
       1_920_000,
       [
@@ -50,6 +51,7 @@ async function seed(): Promise<void> {
     [
       "seed-wildfire",
       "kmn-pqrs-tuv",
+      "California wildfire aggregate review",
       now - 86_400_000,
       1_140_000,
       [
@@ -62,6 +64,7 @@ async function seed(): Promise<void> {
     [
       "seed-renewal",
       "wxy-zabc-def",
+      "Henderson renewal decision",
       now - 3_600_000,
       780_000,
       [
@@ -73,10 +76,11 @@ async function seed(): Promise<void> {
     ],
   ];
 
-  for (const [id, code, startedAt, durationMs, texts] of fixtures) {
+  for (const [id, code, purpose, startedAt, durationMs, texts] of fixtures) {
     await saveMeeting({
       _id: id,
       meetUrl: `https://meet.google.com/${code}`,
+      purpose,
       status: "ended",
       createdAt: new Date(startedAt).toISOString(),
       endedAt: new Date(startedAt + durationMs).toISOString(),

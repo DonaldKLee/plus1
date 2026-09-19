@@ -12,6 +12,7 @@ const MEET_RE =
 export function JoinMeeting() {
   const router = useRouter();
   const [url, setUrl] = useState("");
+  const [purpose, setPurpose] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +34,7 @@ export function JoinMeeting() {
     setError(null);
     setBusy(true);
     try {
-      const sessionId = await joinMeeting(trimmed);
+      const sessionId = await joinMeeting(trimmed, purpose.trim());
       router.push(`/app/meetings/${sessionId}`);
     } catch (err) {
       setError(
@@ -46,6 +47,29 @@ export function JoinMeeting() {
   return (
     <section className="rounded-[var(--r-lg)] border border-border bg-bg-subtle">
       <form onSubmit={submit} className="p-5 sm:p-6">
+        <div className="mb-4">
+          <label
+            htmlFor="meet-purpose"
+            className="mb-1.5 block text-[13px] font-medium text-fg"
+          >
+            What is this meeting for?
+          </label>
+          <Input
+            id="meet-purpose"
+            value={purpose}
+            disabled={busy}
+            onChange={(e) => setPurpose(e.target.value)}
+            placeholder="Tampa warehouse submission review"
+            maxLength={120}
+            autoComplete="off"
+            className="disabled:opacity-50"
+          />
+          <p className="mt-1.5 text-[12px] text-fg-subtle">
+            How the meeting is labelled everywhere in the dashboard. Optional —
+            leave it blank and the first thing said becomes the label.
+          </p>
+        </div>
+
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
           <div className="min-w-0 flex-1">
             <label

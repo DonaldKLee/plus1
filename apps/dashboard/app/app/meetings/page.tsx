@@ -1,4 +1,5 @@
 import { PageBody, PageHeader } from "@/components/dash/PageHeader";
+import { ArchiveStats } from "@/components/dash/ArchiveStats";
 import { SessionsList } from "@/components/dash/SessionsList";
 
 export const metadata = { title: "Meetings" };
@@ -8,10 +9,11 @@ export default function MeetingsPage() {
     <>
       <PageHeader
         title="Meetings"
-        description="Every room the goose has sat in. Open one to watch its live transcript."
+        description="Every room the goose has sat in. Transcripts are saved to MongoDB — open one to read it back, or search across all of them."
       />
       <PageBody>
-        <SessionsList />
+        <ArchiveStats />
+        <SessionsList searchable />
       </PageBody>
     </>
   );

@@ -51,8 +51,36 @@ export interface SessionSummary {
   meetUrl: string;
   status: SessionStatus;
   createdAt: string;
+  endedAt?: string;
+  durationMs?: number;
   error?: string;
   lineCount: number;
+  /** false for meetings replayed out of MongoDB rather than running here. */
+  live?: boolean;
+  /** Only on search results: the transcript line that matched. */
+  snippet?: string;
+}
+
+/** A full meeting: live from memory, or replayed from MongoDB. */
+export interface SessionDetail {
+  id: string;
+  meetUrl: string;
+  status: SessionStatus;
+  createdAt: string;
+  endedAt?: string;
+  durationMs?: number;
+  error?: string;
+  notes: string[];
+  lines: TranscriptLine[];
+  decisions: DecisionRecord[];
+  live: boolean;
+}
+
+export interface MeetingStats {
+  meetings: number;
+  lines: number;
+  gooseLines: number;
+  totalDurationMs: number;
 }
 
 export const STATUS_LABEL: Record<SessionStatus, string> = {
@@ -132,6 +160,37 @@ export async function fetchSessions(): Promise<SessionSummary[]> {
   if (!res.ok) throw new Error(`Agent returned ${res.status}`);
   const json = await res.json();
   return (json.sessions ?? []) as SessionSummary[];
+}
+
+/** One meeting in full. Works for past meetings once MongoDB is configured. */
+export async function fetchSession(id: string): Promise<SessionDetail | null> {
+  const res = await fetch(`${AGENT_URL}/api/meet/sessions/${id}`, { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Agent returned ${res.status}`);
+  const json = await res.json();
+  return (json.session ?? null) as SessionDetail | null;
+}
+
+/** Full-text search across stored transcripts (MongoDB text index). */
+export async function searchMeetings(q: string): Promise<SessionSummary[]> {
+  const res = await fetch(`${AGENT_URL}/api/meet/search?q=${encodeURIComponent(q)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Agent returned ${res.status}`);
+  const json = await res.json();
+  return (json.results ?? []) as SessionSummary[];
+}
+
+export async function fetchStats(): Promise<MeetingStats | null> {
+  const res = await fetch(`${AGENT_URL}/api/meet/stats`, { cache: "no-store" });
+  if (!res.ok) return null;
+  const json = await res.json();
+  return (json.stats ?? null) as MeetingStats | null;
+}
+
+/** Remove a meeting from the archive (and end it if it is still running). */
+export async function deleteMeeting(id: string): Promise<void> {
+  await fetch(`${AGENT_URL}/api/meet/sessions/${id}`, { method: "DELETE" });
 }
 
 export async function leaveSession(id: string): Promise<void> {

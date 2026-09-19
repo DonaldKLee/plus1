@@ -44,6 +44,21 @@ The core product flow, end to end:
 `GEMINI_API_KEY` in `.env`. First run needs a one-time Google sign-in in the headed Chrome
 profile (`npm run backend:google-login`, or just sign in when the window opens).
 
+## Persistence (MongoDB Atlas)
+
+`apps/backend/src/store.ts` mirrors every session into Atlas — one `meetings` document per
+session holding the settled transcript lines, the goose's decisions, operator notes, status and
+duration, plus a flattened `transcript` field carrying a text index. The in-memory Map in
+`meetTranscribe.ts` stays the source of truth while a meeting runs; writes are debounced (~1 s)
+and failures are logged, never fatal. With `MONGODB_URI` unset the whole module no-ops and the
+app behaves exactly as before.
+
+`listSessions()` / `getSession()` are async and merge live sessions with stored ones, so the
+dashboard shows history across backend restarts and `/app/meetings/[id]` replays a finished
+meeting. Extra endpoints: `GET /api/meet/search?q=`, `GET /api/meet/stats`,
+`DELETE /api/meet/sessions/:id`. Network stays in `apps/backend`; nothing in `packages/brain`
+touches the database.
+
 All prior fixture/dummy data (personas, integrations, replay demo) has been removed; the dashboard
 is Home / Meetings / Underwrite only.
 

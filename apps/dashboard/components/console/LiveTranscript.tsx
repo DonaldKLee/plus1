@@ -10,6 +10,7 @@ import {
   filler,
   honk,
   interrupt,
+  fetchSession,
   leaveSession,
   speak,
   streamUrl,
@@ -48,7 +49,40 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
   const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
+  // Hydrate from the backend first: a meeting that is no longer running in
+  // this process still comes back in full out of MongoDB. Only open the SSE
+  // stream when the session is actually live.
+  const [archived, setArchived] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
   useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const s = await fetchSession(sessionId);
+        if (!alive || !s) {
+          if (alive) setLoaded(true);
+          return;
+        }
+        setStatus(s.status);
+        setError(s.error ?? null);
+        setNotes(s.notes ?? []);
+        setLines(s.lines ?? []);
+        setDecisions(s.decisions ?? []);
+        setArchived(!s.live);
+      } catch {
+        /* fall through to the stream */
+      } finally {
+        if (alive) setLoaded(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!loaded || archived) return;
     const es = new EventSource(streamUrl(sessionId));
 
     es.addEventListener("status", (e) => {
@@ -89,15 +123,15 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
     };
 
     return () => es.close();
-  }, [sessionId]);
+  }, [sessionId, loaded, archived]);
 
   const lastLen = lines[lines.length - 1]?.text.length ?? 0;
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [lines.length, lastLen]);
 
-  const live = status === "listening";
-  const working = status === "joining" || status === "waiting-admit";
+  const live = status === "listening" && !archived;
+  const working = (status === "joining" || status === "waiting-admit") && !archived;
   const acted = decisions.filter((d) => d.outcome && d.outcome !== "held" && d.outcome !== "below threshold");
   const avatarReady = avatar?.session === "ready" || avatar?.session === "speaking";
 
@@ -136,7 +170,12 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
           >
             {STATUS_LABEL[status]}
           </span>
-          {(live || working) && (
+          {archived && (
+            <span className="rounded-full border border-border px-2 py-0.5 text-[11.5px] text-fg-subtle">
+              Saved transcript
+            </span>
+          )}
+          {(live || working) && !archived && (
             <Button variant="ghost" size="sm" onClick={() => leaveSession(sessionId)}>
               Leave call
             </Button>
@@ -148,7 +187,7 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
         {/* Transcript */}
         <Panel as="section" className="flex min-h-0 flex-col overflow-hidden">
           <PanelHead
-            title="Live transcript"
+            title={archived ? "Transcript" : "Live transcript"}
             right={<span className="tnum text-[12px] text-fg-subtle">{lines.length} lines</span>}
           />
 
@@ -168,7 +207,9 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
             {lines.length === 0 && !error && (
               <div className="px-4 py-12 text-center">
                 <p className="text-[13.5px] text-fg-muted">
-                  {working
+                  {archived
+                    ? "No transcript was saved for this meeting."
+                    : working
                     ? "The goose is joining the room…"
                     : status === "ended"
                       ? "This session has ended."

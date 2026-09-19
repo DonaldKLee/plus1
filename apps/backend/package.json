@@ -10,20 +10,24 @@
     "deep-dive": "node --import tsx src/cli.ts deep-dive",
     "screenshare": "node --import tsx src/screenshare.ts",
     "google-login": "node --import tsx src/googleLogin.ts",
-    "cache-refresh": "node --import tsx src/cli.ts cache"
+    "cache-refresh": "node --import tsx src/cli.ts cache",
+    "db:check": "node --import tsx src/seedMeetings.ts check",
+    "db:seed": "node --import tsx src/seedMeetings.ts seed",
+    "db:clear": "node --import tsx src/seedMeetings.ts clear"
   },
   "dependencies": {
     "@browserbasehq/sdk": "^2.6.0",
     "@browserbasehq/stagehand": "^4.1.0",
     "@plus1/brain": "*",
+    "@plus1/liveavatar": "*",
     "@plus1/protocol": "*",
+    "@plus1/voice": "*",
     "browse": "^0.9.6",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "playwright-core": "^1.50.1",
-    "@plus1/liveavatar": "*",
-    "@plus1/voice": "*"
+    "mongodb": "^7.6.0",
+    "playwright-core": "^1.50.1"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

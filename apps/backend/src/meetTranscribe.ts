@@ -118,6 +118,8 @@ interface Session {
   avatar: AvatarStatus;
   lastSpeechEndedAt: number;
   config?: SessionConfig; // from the dashboard's Goose tab
+  memory: string[]; // standing instructions + facts to honor every turn
+  muted?: boolean; // chat-only mode: keep listening, but type instead of speak
 }
 
 /** Per-session goose configuration, sent from the dashboard on join. */
@@ -277,6 +279,7 @@ export function startMeetTranscription(meetUrl: string, config?: SessionConfig):
     avatar: { session: "idle", media: "idle", speaking: false },
     lastSpeechEndedAt: 0,
     config,
+    memory: [],
   };
   session.bus.setMaxListeners(50);
   sessions.set(id, session);
@@ -496,6 +499,41 @@ const REQUEST_RE =
 const OPEN_TASK_RE =
   /\b(can someone|could someone|who can|who wants|we should|we need to|someone needs to|let'?s|to-?do|action item|any volunteers|who'?s going to)\b/i;
 
+// "mute / use the chat" and "unmute / talk again" — a spoken output-mode toggle.
+const MUTE_RE =
+  /\b(mute yourself|mute|be quiet|stay quiet|stop talking|stop speaking|don'?t talk|quit talking|use (the )?chat|just (use )?(the )?chat|chat only|type it|put it in (the )?chat)\b/i;
+const UNMUTE_RE =
+  /\b(unmute|you can talk|talk again|start talking|speak up|out loud|use your voice|voice again|talk to us)\b/i;
+
+/** A spoken command to switch output mode, or null. Checked only when addressed. */
+function detectModeCommand(text: string): "chat" | "voice" | null {
+  if (UNMUTE_RE.test(text)) return "voice";
+  if (MUTE_RE.test(text)) return "chat";
+  return null;
+}
+
+function latestHumanText(s: Session): string {
+  for (let i = s.lines.length - 1; i >= 0; i--) {
+    const l = s.lines[i]!;
+    if (!l.partial && !l.agent) return l.text;
+  }
+  return "";
+}
+
+const MEMORY_CAP = 24;
+/** Merge new things-to-remember into the session's standing memory. */
+function rememberFrom(s: Session, items?: string[]): void {
+  if (!items?.length) return;
+  for (const raw of items) {
+    const item = raw.trim();
+    if (!item) continue;
+    if (s.memory.some((m) => m.toLowerCase() === item.toLowerCase())) continue;
+    s.memory.push(item);
+    note(s, `Remembering: "${item}"`);
+  }
+  if (s.memory.length > MEMORY_CAP) s.memory = s.memory.slice(-MEMORY_CAP);
+}
+
 /** Addressed by the "goose"/"plus one" aliases or the session's configured name. */
 function isAddressed(s: Session, text: string): boolean {
   if (ADDRESSED_RE.test(text)) return true;
@@ -516,9 +554,11 @@ function worthConsidering(s: Session): boolean {
   const recent = s.lines.filter((l) => !l.partial && !l.agent).slice(-2);
   const text = recent.map((l) => l.text).join(" ");
   if (!text.trim()) return false;
-  // Proactive (high autonomy): engage like a real participant — weigh in on most
-  // substantive lines, and let the planner decide whether it's actually welcome.
-  if (autonomyOf(s) >= 67 && text.trim().split(/\s+/).length >= 3) return true;
+  // Goose's job is to catch mistakes and participate, so once it's balanced-or-higher,
+  // or it's holding a standing instruction to watch for something, weigh in on any
+  // substantive line and let the planner decide whether it's actually welcome.
+  const substantive = text.trim().split(/\s+/).length >= 3;
+  if (substantive && (autonomyOf(s) >= 34 || s.memory.length > 0)) return true;
   return (
     isAddressed(s, text) ||
     text.includes("?") ||
@@ -544,6 +584,16 @@ async function runBrain(s: Session): Promise<void> {
   // Only consult the LLM when a line actually looks actionable.
   if (!worthConsidering(s)) return;
 
+  // Spoken output-mode toggle: "mute / use the chat" ↔ "talk again". Persists.
+  const latest = latestHumanText(s);
+  if (isAddressed(s, latest) || isOneOnOne(s)) {
+    const mode = detectModeCommand(latest);
+    if (mode && s.muted !== (mode === "chat")) {
+      s.muted = mode === "chat";
+      note(s, s.muted ? "Muted — switching to chat-only (still listening)." : "Unmuted — talking out loud again.");
+    }
+  }
+
   s.brainBusy = true;
   s.lastBrainAt = Date.now();
   try {
@@ -552,7 +602,10 @@ async function runBrain(s: Session): Promise<void> {
       name: nameOf(s),
       autonomy: autonomyOf(s),
       access: toolAccessOf(s),
+      memory: s.memory,
+      muted: s.muted,
     });
+    rememberFrom(s, decision.remember);
     const record: DecisionRecord = {
       ...decision,
       id: randomUUID(),
@@ -611,6 +664,12 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
   }
 
   if (d.action === "speak" && d.say) {
+    // Chat-only mode (asked to mute): type it instead of speaking.
+    if (s.muted) {
+      note(s, `Muted → chat: "${d.say}"`);
+      const ok = await postToMeetChat(page, d.say);
+      return ok ? "muted; posted to chat" : "muted; chat failed";
+    }
     note(s, `Speaking: "${d.say}"`);
     if (!s.rig) {
       const ok = await postToMeetChat(page, `${nameOf(s)}: ${d.say}`);
@@ -634,7 +693,7 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
     if (d.say) {
       note(s, `Announcing: "${d.say}"`);
       try {
-        if (s.rig) {
+        if (s.rig && !s.muted) {
           const u = s.rig.speakText(d.say);
           gooseLine(s, d.say, u.done);
           await u.done;

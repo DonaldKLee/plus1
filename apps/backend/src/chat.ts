@@ -22,6 +22,7 @@ interface ChatSession {
   id: string;
   config?: SessionConfig;
   messages: ChatMessage[];
+  memory: string[]; // standing instructions + facts to honor every turn
   createdAt: string;
 }
 
@@ -50,7 +51,7 @@ function msg(role: ChatMessage["role"], text: string, kind: ChatMessage["kind"] 
 
 export function createChat(config?: SessionConfig): { chatId: string } {
   const id = randomUUID();
-  chats.set(id, { id, config, messages: [], createdAt: new Date().toISOString() });
+  chats.set(id, { id, config, messages: [], memory: [], createdAt: new Date().toISOString() });
   return { chatId: id };
 }
 
@@ -95,7 +96,17 @@ export async function sendChatMessage(
     name: nameOf(c.config),
     autonomy: autonomyOf(c.config),
     access,
+    memory: c.memory,
   });
+
+  // Hold onto anything worth remembering across turns.
+  if (decision.remember?.length) {
+    for (const raw of decision.remember) {
+      const item = raw.trim();
+      if (item && !c.memory.some((m) => m.toLowerCase() === item.toLowerCase())) c.memory.push(item);
+    }
+    if (c.memory.length > 24) c.memory = c.memory.slice(-24);
+  }
 
   const out: ChatMessage[] = [];
 

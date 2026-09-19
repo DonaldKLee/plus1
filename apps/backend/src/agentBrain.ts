@@ -23,6 +23,7 @@ export interface Decision {
   say?: string;
   chatMessage?: string;
   tool?: { name: string; query?: string; path?: string; content?: string; command?: string };
+  remember?: string[];
 }
 
 /** Which tools this session may use. Built from the dashboard Goose config. */
@@ -77,7 +78,13 @@ function autonomyStance(autonomy: number): string {
   return `You are PROACTIVE. Speak up whenever you can genuinely help, volunteer for open tasks, and treat a group like a normal back-and-forth — but always defer instantly to a human who wants to take something.`;
 }
 
-function buildSystemPrompt(opts: { name: string; autonomy: number; tools: ToolSpec[] }): string {
+function buildSystemPrompt(opts: {
+  name: string;
+  autonomy: number;
+  tools: ToolSpec[];
+  memory?: string[];
+  muted?: boolean;
+}): string {
   const name = opts.name;
   const hasTools = opts.tools.length > 0;
   const toolsSection = hasTools
@@ -85,11 +92,21 @@ function buildSystemPrompt(opts: { name: string; autonomy: number; tools: ToolSp
 Available tools:
 ${opts.tools.map((t) => `  - ${t.doc}`).join("\n")}`
     : `You have no tools available right now.`;
+  const memorySection =
+    opts.memory && opts.memory.length > 0
+      ? `\nWHAT TO REMEMBER — standing context and instructions. Honor EVERY item on EVERY turn, even after it has scrolled out of the transcript below:
+${opts.memory.map((m) => `  - ${m}`).join("\n")}\n`
+      : "";
+  const mutedNote = opts.muted
+    ? `\nYou are in CHAT-ONLY mode right now: someone asked you to stop talking and use the chat. Keep participating exactly as before, but your words go to the meeting chat, not out loud. Stay this way until someone tells you to talk / unmute again.\n`
+    : "";
   return `You are "${name}", an AI teammate attending a live meeting as a real participant — not a bot.
 You are given the most recent lines of the meeting transcript. Decide what to do RIGHT NOW.
 
-Talk like a colleague on a call: warm, brief, lowercase, one or two sentences, contractions. Never sound like a chatbot. Never react to your own previous messages.
+Your job is to CATCH MISTAKES and PARTICIPATE — you're here to keep everyone honest and pitch in, not just answer when spoken to. Watch for wrong numbers, claims that contradict something said earlier or something you know, missing steps, and anything that seems off — and jump in when you catch one, briefly, and only when you're fairly sure. When someone hands you a standing instruction ("let us know if you spot mistakes", "remind me to X later", "her name is actually Y", "mute and use the chat"), put a short note in "remember" so you don't lose it once it scrolls away.
 
+Talk like a colleague on a call: warm, brief, lowercase, one or two sentences, contractions. Never sound like a chatbot. Never react to your own previous messages.
+${memorySection}${mutedNote}
 Act when it is useful and welcome:
 - Someone addresses you ("${name}", "goose", or "plus one").
 - Someone asks an open question you or a tool can helpfully answer.
@@ -108,6 +125,7 @@ Actions:
 - "chat": post a message to the meeting text chat (use this when asked to "put it in the chat", or to share a draft / link / longer text). Put the text in "chatMessage".
 ${toolsSection}
 
+Put anything worth holding onto for later into "remember" — a short phrase per item (new facts, standing instructions to watch for, name corrections). Only add what's genuinely worth remembering.
 Set confidence 0..1 for how sure you are that acting now is the right call.`;
 }
 
@@ -126,6 +144,7 @@ function buildResponseSchema(tools: ToolSpec[]) {
       reason: { type: "string" },
       say: { type: "string" },
       chatMessage: { type: "string" },
+      remember: { type: "array", items: { type: "string" } },
     },
     required: ["act", "action", "confidence", "reason"],
   };
@@ -147,7 +166,15 @@ function buildResponseSchema(tools: ToolSpec[]) {
 /** Ask Gemini whether to act on the current transcript window. */
 export async function decideAction(
   transcript: string,
-  opts?: { oneOnOne?: boolean; name?: string; autonomy?: number; access?: ToolAccess; channel?: "meeting" | "chat" },
+  opts?: {
+    oneOnOne?: boolean;
+    name?: string;
+    autonomy?: number;
+    access?: ToolAccess;
+    channel?: "meeting" | "chat";
+    memory?: string[];
+    muted?: boolean;
+  },
 ): Promise<Decision> {
   const key = env("GEMINI_API_KEY");
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${DECIDE_MODEL}:generateContent?key=${key}`;
@@ -155,7 +182,8 @@ export async function decideAction(
   const autonomy = typeof opts?.autonomy === "number" ? opts.autonomy : 50;
   const tools = toolCatalog(opts?.access ?? {});
   const channelNote = opts?.channel === "chat" ? CHAT_NOTE : opts?.oneOnOne ? ONE_ON_ONE_NOTE : "";
-  const systemText = buildSystemPrompt({ name, autonomy, tools }) + channelNote;
+  const systemText =
+    buildSystemPrompt({ name, autonomy, tools, memory: opts?.memory, muted: opts?.muted }) + channelNote;
   const body = {
     systemInstruction: { parts: [{ text: systemText }] },
     contents: [{ role: "user", parts: [{ text: `Recent transcript:\n${transcript}` }] }],
@@ -210,6 +238,9 @@ export async function decideAction(
     say: parsed.say,
     chatMessage: parsed.chatMessage,
     tool: parsed.tool,
+    remember: Array.isArray(parsed.remember)
+      ? parsed.remember.filter((r): r is string => typeof r === "string" && r.trim().length > 0)
+      : undefined,
   };
 }
 

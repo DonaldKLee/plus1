@@ -1,0 +1,29 @@
+{
+  "name": "@plus1/brain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./federato": {
+      "types": "./src/federato/index.ts",
+      "import": "./src/federato/index.ts",
+      "default": "./src/federato/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test src/federato/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@plus1/protocol": "*"
+  },
+  "devDependencies": {
+    "typescript": "5.7.3"
+  }
+}

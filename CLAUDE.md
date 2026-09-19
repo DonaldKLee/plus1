@@ -9,12 +9,22 @@
 ## Layout
 
 ```
-apps/dashboard/   Next.js — setup, integrations, join, the three-column live console
-apps/runner/      Node + Playwright — Meet, fake media, captions, chat   (not yet built)
-workers/          Hono API + MeetingSession Durable Object + queue        (not yet built)
-packages/         brain · goose · mcp-client · voice · protocol           (not yet built)
-fixtures/         transcript-demo.json + messy-corpus                     (transcript built)
+apps/dashboard/        Next.js — setup, integrations, live console, **UW tab**
+apps/federato-agent/   Federato API + Browserbase work browser + screenshare helper
+apps/runner/           Node + Playwright — Meet, fake media (not yet / teammate)
+workers/               Hono API + MeetingSession DO (not yet)
+packages/brain         gate/planner + **federato appetite + query plan** (pure)
+packages/protocol      shared zod/types for runner + Federato pack
+fixtures/              transcript-demo.json
 ```
+
+## Federato pack (feat/federato-browserbase)
+
+- Pure scoring in `packages/brain/src/federato` — never import fetch there.
+- Network + Browserbase only in `apps/federato-agent`.
+- Dashboard UW tab polls `NEXT_PUBLIC_FEDERATO_AGENT_URL` (default `:8787`).
+- Camera/goose is teammate-owned; screenshare = Present Browserbase live-view tab.
+
 
 ## This session
 

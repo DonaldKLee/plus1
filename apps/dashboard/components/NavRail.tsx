@@ -1,11 +1,12 @@
 "use client";
 
-import { Console, Sliders, Plug } from "./icons";
+import { Console, Sliders, Plug, Shield } from "./icons";
 
-export type View = "console" | "setup" | "integrations";
+export type View = "console" | "underwrite" | "setup" | "integrations";
 
 const ITEMS: { id: View; label: string; Icon: typeof Console }[] = [
   { id: "console", label: "Console", Icon: Console },
+  { id: "underwrite", label: "UW", Icon: Shield },
   { id: "setup", label: "Setup", Icon: Sliders },
   { id: "integrations", label: "Tools", Icon: Plug },
 ];

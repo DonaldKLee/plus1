@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { NavRail, type View } from "@/components/NavRail";
 import { ConsoleView } from "@/components/ConsoleView";
+import { Underwrite } from "@/components/Underwrite";
 import { Setup } from "@/components/Setup";
 import { Integrations } from "@/components/Integrations";
 
@@ -14,6 +15,7 @@ export default function Page() {
       <NavRail view={view} onView={setView} />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {view === "console" && <ConsoleView />}
+        {view === "underwrite" && <Underwrite />}
         {view === "setup" && <Setup />}
         {view === "integrations" && <Integrations />}
       </div>

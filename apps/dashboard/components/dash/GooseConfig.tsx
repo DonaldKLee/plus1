@@ -367,7 +367,7 @@ export function GooseConfig() {
   return (
     <div className="flex flex-col gap-6">
       {(saved || live) && (
-        <div className="rise-in fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-[var(--r-sm)] border border-border bg-bg-subtle px-3 py-2 text-[12.5px] text-fg-muted shadow-sm">
+        <div className="rise-in fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-[var(--r-sm)] border border-border bg-bg-subtle px-3 py-2 text-[12.5px] text-fg-muted shadow-[var(--shadow-lg)]">
           <Dot color="var(--live)" pulse={live} />
           {live ? "Applied to live meeting" : remote ? "Saved to MongoDB" : "Saved in this browser"}
         </div>
@@ -377,8 +377,7 @@ export function GooseConfig() {
       <div className="flex items-start gap-3 rounded-[var(--r)] border border-border bg-bg-subtle p-4">
         <GooseMark size={26} className="mt-0.5 shrink-0 text-fg" />
         <div className="min-w-0">
-          <span className="eyebrow">How it behaves</span>
-          <p className="mt-1 text-[15px] leading-relaxed text-fg">{sentence}</p>
+          <p className="text-[15px] leading-relaxed text-fg">{sentence}</p>
         </div>
       </div>
 
@@ -400,7 +399,7 @@ export function GooseConfig() {
             </p>
           </label>
           <div>
-            <span className="eyebrow mb-1.5 block">In the call</span>
+            <span className="mb-1.5 block text-[13px] font-medium text-fg">In the call</span>
             <div className="flex items-center gap-2.5 rounded-[var(--r-sm)] border border-border bg-bg px-3 py-2.5">
               <GooseMark size={22} className="shrink-0 text-fg" />
               <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-fg">{displayName}</span>
@@ -559,7 +558,7 @@ export function GooseConfig() {
                     <p className="mt-1 max-w-[62ch] text-[13px] leading-relaxed text-fg-muted">{s.summary}</p>
                     {s.id === "local" && on && (
                       <div className="rise-in mt-3 flex flex-wrap items-center gap-3">
-                        <span className="eyebrow">Access</span>
+                        <span className="text-[12.5px] font-medium text-fg-muted">Access</span>
                         <Segmented value={config.localAccess} onChange={(n) => set("localAccess", n)} />
                         <span className="text-[12px] text-fg-subtle">
                           {config.localAccess === "write"

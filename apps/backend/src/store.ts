@@ -90,6 +90,7 @@ async function db(): Promise<Db | null> {
       // Recent-first listing, plus full-text search over purpose + transcript.
       await meetings.createIndex({ createdAt: -1 }).catch(() => {});
       await ensureTextIndex(meetings);
+      await backfillPreviews(meetings);
       console.log(`[store] connected to MongoDB (db: ${database.databaseName})`);
       return database;
     })().catch((e) => {
@@ -120,6 +121,30 @@ async function ensureTextIndex(col: Collection<MeetingDoc>): Promise<void> {
     } catch (inner) {
       console.warn(`[store] could not rebuild text index: ${(inner as Error).message}`);
     }
+  }
+}
+
+/**
+ * `preview` is computed on save, so meetings stored before it existed have
+ * none and fall back to showing a raw room code. Fill them in once at startup;
+ * after the first pass the query matches nothing and costs a single index hit.
+ */
+async function backfillPreviews(col: Collection<MeetingDoc>): Promise<void> {
+  try {
+    const stale = await col
+      .find({ preview: { $exists: false } }, { projection: { lines: 1 } })
+      .limit(500)
+      .toArray();
+    let filled = 0;
+    for (const doc of stale) {
+      const preview = previewOf(doc.lines ?? []);
+      // Write even when empty, so a meeting with no usable line is not rescanned.
+      await col.updateOne({ _id: doc._id }, { $set: { preview: preview ?? "" } });
+      if (preview) filled += 1;
+    }
+    if (filled) console.log(`[store] backfilled ${filled} meeting preview(s)`);
+  } catch (e) {
+    console.warn(`[store] preview backfill skipped: ${(e as Error).message}`);
   }
 }
 
@@ -195,7 +220,7 @@ function toSummary(d: MeetingDoc): MeetingSummary {
     id: d._id,
     meetUrl: d.meetUrl,
     purpose: d.purpose,
-    preview: d.preview,
+    preview: d.preview || undefined,
     status: d.status,
     createdAt: d.createdAt,
     endedAt: d.endedAt,

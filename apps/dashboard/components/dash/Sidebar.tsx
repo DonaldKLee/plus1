@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Wordmark, cx } from "@/components/ui";
+import { GooseMark, cx } from "@/components/ui";
 import { Home, History, Menu, Close, Shield, Sliders, Chat } from "@/components/icons";
+import { AGENT_URL } from "@/lib/session";
 
 const NAV = [
   { href: "/app", label: "Home", Icon: Home },
@@ -18,10 +19,25 @@ function isActive(pathname: string, href: string) {
   return href === "/app" ? pathname === "/app" : pathname.startsWith(href);
 }
 
+/** Logo tile + wordmark. Its rule is the rail's only structural divider up top. */
+function Brand() {
+  return (
+    <Link
+      href="/"
+      className="flex h-[60px] shrink-0 items-center gap-2.5 px-3 transition-opacity hover:opacity-80"
+    >
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--r-sm)] bg-inverse-bg">
+        <GooseMark size={19} className="text-inverse-fg" eye="var(--inverse-bg)" />
+      </span>
+      <span className="text-[15px] font-semibold tracking-[-0.03em] text-fg">plus1</span>
+    </Link>
+  );
+}
+
 function NavList({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   return (
-    <nav className="flex flex-col gap-0.5">
+    <nav className="flex flex-col gap-px">
       {NAV.map(({ href, label, Icon }) => {
         const active = isActive(pathname, href);
         return (
@@ -31,25 +47,73 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
             className={cx(
-              "group relative flex h-9 items-center gap-2.5 rounded-[var(--r-sm)] px-2.5",
-              "text-[13.5px] font-medium tracking-[-0.01em] transition-colors duration-150",
+              "group flex h-9 items-center gap-2.5 rounded-[var(--r-sm)] px-2.5",
+              "text-[14px] tracking-[-0.01em] transition-colors duration-150",
               active
-                ? "bg-bg-raise text-fg"
-                : "text-fg-muted hover:bg-bg-raise/60 hover:text-fg",
+                ? "bg-bg-raise font-medium text-fg"
+                : "font-normal text-fg-muted hover:bg-bg-subtle hover:text-fg",
             )}
           >
-            {active && (
-              <span
-                className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full"
-                style={{ background: "var(--brand)" }}
-              />
-            )}
-            <Icon width={16} height={16} className={active ? "text-fg" : "text-fg-subtle group-hover:text-fg-muted"} />
+            <Icon
+              width={18}
+              height={18}
+              className={cx(
+                "shrink-0 transition-colors",
+                active ? "text-fg" : "text-fg-subtle group-hover:text-fg-muted",
+              )}
+            />
             {label}
           </Link>
         );
       })}
     </nav>
+  );
+}
+
+/**
+ * Whether the local agent is up. The rail is the one place this belongs: it is
+ * true of the whole console, not of any single page, and every feature here
+ * fails the same way without it.
+ */
+function AgentStatus() {
+  const [up, setUp] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const ping = async () => {
+      try {
+        const res = await fetch(`${AGENT_URL}/health`, { cache: "no-store" });
+        if (alive) setUp(res.ok);
+      } catch {
+        if (alive) setUp(false);
+      }
+    };
+    ping();
+    const id = setInterval(ping, 20000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
+  const label =
+    up === null ? "Checking agent…" : up ? "Agent connected" : "Agent offline";
+
+  return (
+    <div className="flex h-9 items-center gap-2.5 px-2.5" title={AGENT_URL}>
+      <span
+        className={cx("dot", up === true && "dot-pulse")}
+        style={{
+          color:
+            up === null
+              ? "var(--fg-subtle)"
+              : up
+                ? "var(--live)"
+                : "var(--alert)",
+        }}
+      />
+      <span className="text-[12.5px] text-fg-muted">{label}</span>
+    </div>
   );
 }
 
@@ -68,15 +132,16 @@ export function Sidebar() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  const panel = (
+  const rail = (
     <>
-      <div className="px-2">
-        <Link href="/" className="inline-flex rounded-[var(--r-sm)]">
-          <Wordmark />
-        </Link>
+      <div className="border-b border-border">
+        <Brand />
       </div>
-      <div className="mt-6">
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
         <NavList onNavigate={() => setOpen(false)} />
+      </div>
+      <div className="border-t border-border p-2">
+        <AgentStatus />
       </div>
     </>
   );
@@ -84,10 +149,8 @@ export function Sidebar() {
   return (
     <>
       {/* mobile bar */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4 lg:hidden">
-        <Link href="/" className="inline-flex rounded-[var(--r-sm)]">
-          <Wordmark />
-        </Link>
+      <header className="flex h-[60px] shrink-0 items-center justify-between border-b border-border bg-bg pr-3 lg:hidden">
+        <Brand />
         <button
           onClick={() => setOpen(true)}
           aria-label="Open navigation"
@@ -103,10 +166,11 @@ export function Sidebar() {
           <button
             aria-label="Close navigation"
             onClick={() => setOpen(false)}
-            className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
+            className="absolute inset-0 bg-[rgba(9,9,11,0.32)] backdrop-blur-[2px]"
           />
-          <div className="rise-in absolute inset-y-0 left-0 flex w-[264px] flex-col border-r border-border bg-bg p-3">
-            <div className="mb-2 flex justify-end">
+          <div className="rise-in absolute inset-y-0 left-0 flex w-[248px] flex-col border-r border-border bg-bg">
+            <div className="flex items-center justify-between border-b border-border pr-2">
+              <Brand />
               <button
                 onClick={() => setOpen(false)}
                 aria-label="Close navigation"
@@ -115,14 +179,19 @@ export function Sidebar() {
                 <Close width={16} height={16} />
               </button>
             </div>
-            {panel}
+            <div className="min-h-0 flex-1 overflow-y-auto p-2">
+              <NavList onNavigate={() => setOpen(false)} />
+            </div>
+            <div className="border-t border-border p-2">
+              <AgentStatus />
+            </div>
           </div>
         </div>
       )}
 
       {/* desktop rail */}
-      <aside className="hidden w-[248px] shrink-0 flex-col border-r border-border p-3 lg:flex">
-        {panel}
+      <aside className="hidden w-[232px] shrink-0 flex-col border-r border-border bg-bg lg:flex">
+        {rail}
       </aside>
     </>
   );

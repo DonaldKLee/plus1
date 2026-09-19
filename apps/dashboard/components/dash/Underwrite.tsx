@@ -267,7 +267,7 @@ export function Underwrite() {
 
       {meetNotes && meetNotes.length > 0 && (
         <div className="rounded-[var(--r)] border border-border bg-bg-subtle px-4 py-3">
-          <p className="eyebrow mb-1.5">Presented in Meet</p>
+          <p className="mb-1.5 text-[12.5px] font-medium text-fg-muted">Presented in Meet</p>
           <ul className="flex flex-col gap-1">
             {meetNotes.map((n) => (
               <li key={n} className="text-[12.5px] text-fg-muted">
@@ -441,7 +441,7 @@ export function Underwrite() {
 
                   {dive.browse && (
                     <div className="mt-4 rounded-[var(--r-sm)] border border-border p-3">
-                      <p className="eyebrow mb-1.5">Browserbase</p>
+                      <p className="mb-1.5 text-[12.5px] font-medium text-fg-muted">Browserbase</p>
                       <p className="tnum text-[12px] text-fg-muted">
                         {dive.browse.status} · {dive.browse.sessionId}
                       </p>

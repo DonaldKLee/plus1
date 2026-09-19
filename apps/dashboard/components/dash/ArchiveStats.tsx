@@ -33,21 +33,17 @@ export function ArchiveStats() {
 
   if (!stats || stats.meetings === 0) return null;
 
-  const items: [string, string][] = [
-    ["Meetings archived", String(stats.meetings)],
-    ["Lines transcribed", stats.lines.toLocaleString()],
-    ["Spoken by the goose", stats.gooseLines.toLocaleString()],
-    ["Time in rooms", fmtHours(stats.totalDurationMs)],
-  ];
+  // A sentence, not a metric wall: these are context for the list below,
+  // never the point of the page.
+  const n = (v: number) => <span className="tnum font-medium text-fg">{v.toLocaleString()}</span>;
 
   return (
-    <div className="mb-4 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--r)] border border-border bg-border sm:grid-cols-4">
-      {items.map(([label, value]) => (
-        <div key={label} className="bg-bg px-4 py-3">
-          <p className="tnum text-[18px] font-semibold tracking-[-0.02em] text-fg">{value}</p>
-          <p className="text-[12px] text-fg-subtle">{label}</p>
-        </div>
-      ))}
-    </div>
+    <p className="mb-4 text-[13px] leading-relaxed text-fg-muted">
+      {n(stats.meetings)} meeting{stats.meetings === 1 ? "" : "s"} archived ·{" "}
+      {n(stats.lines)} lines transcribed, {n(stats.gooseLines)} of them spoken by
+      the goose ·{" "}
+      <span className="tnum font-medium text-fg">{fmtHours(stats.totalDurationMs)}</span>{" "}
+      in rooms
+    </p>
   );
 }

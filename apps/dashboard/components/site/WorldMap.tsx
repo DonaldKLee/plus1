@@ -323,7 +323,7 @@ export function WorldMap() {
     }
   }, []);
 
-  const hot = hovered ? SESSIONS[hovered.i] : null;
+  const hot = hovered !== null;
 
   return (
     <figure className="m-0">
@@ -348,11 +348,14 @@ export function WorldMap() {
 
         {hot && hovered && (
           <div
-            className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-[calc(100%+12px)] whitespace-nowrap rounded-[var(--r-sm)] border border-border bg-bg px-2.5 py-1.5 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.25)]"
+            className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-[calc(100%+12px)] rounded-[var(--r-sm)] border border-border bg-bg px-2.5 py-1.5 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.25)]"
             style={{ left: hovered.x, top: hovered.y }}
+            role="status"
+            aria-label="A goose is in this meeting"
           >
-            <p className="text-[12.5px] font-medium text-fg">{hot.city}</p>
-            <p className="text-[11.5px] text-fg-muted">{hot.note}</p>
+            <span aria-hidden="true" className="block text-[32px] leading-none">
+              👋
+            </span>
           </div>
         )}
       </div>

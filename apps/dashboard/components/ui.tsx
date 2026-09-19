@@ -10,7 +10,15 @@ export function cx(...parts: (string | false | null | undefined)[]) {
  * The plus1 mark: a Canada goose head in profile, beak in brand amber, with a
  * suit collar at the neck. Two-tone so it survives on either theme.
  */
-export function GooseMark({ size = 24, ...p }: SVGProps<SVGSVGElement> & { size?: number }) {
+export function GooseMark({
+  size = 24,
+  eye = "var(--bg)",
+  ...p
+}: SVGProps<SVGSVGElement> & {
+  size?: number;
+  /** The punched-out eye. Override when the mark sits on an inverted tile. */
+  eye?: string;
+}) {
   return (
     <svg viewBox="0 0 32 32" width={size} height={size} fill="none" aria-hidden {...p}>
       {/* neck, sweeping down and left out of the head */}
@@ -20,7 +28,7 @@ export function GooseMark({ size = 24, ...p }: SVGProps<SVGSVGElement> & { size?
       />
       <ellipse cx="17" cy="13" rx="9" ry="8.4" fill="currentColor" />
       <path d="M25.4 10.2 31.6 13.4 25.4 16.6Z" fill="var(--brand)" />
-      <circle cx="20.2" cy="11.2" r="1.5" fill="var(--bg)" />
+      <circle cx="20.2" cy="11.2" r="1.5" fill={eye} />
     </svg>
   );
 }
@@ -43,9 +51,9 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 const BTN_VARIANT: Record<NonNullable<ButtonProps["variant"]>, string> = {
   primary:
-    "bg-inverse-bg text-inverse-fg hover:opacity-85 disabled:opacity-40 disabled:hover:opacity-40",
+    "bg-inverse-bg text-inverse-fg shadow-[var(--shadow-sm)] hover:bg-[var(--inverse-bg-hover)] disabled:opacity-40 disabled:hover:bg-inverse-bg",
   secondary:
-    "bg-bg border border-border text-fg hover:bg-bg-raise hover:border-border-strong disabled:opacity-40",
+    "bg-bg border border-border text-fg shadow-[var(--shadow-sm)] hover:bg-bg-subtle hover:border-border-strong disabled:opacity-40",
   ghost: "text-fg-muted hover:text-fg hover:bg-bg-raise disabled:opacity-40",
   brand:
     "bg-brand text-[var(--brand-ink)] hover:brightness-95 disabled:opacity-40",
@@ -109,7 +117,7 @@ export function Panel({
   return (
     <As
       className={cx(
-        "rounded-[var(--r)] border border-border bg-bg-subtle",
+        "rounded-[var(--r)] border border-border bg-bg shadow-[var(--shadow-sm)]",
         className,
       )}
     >
@@ -131,11 +139,11 @@ export function PanelHead({
   return (
     <div
       className={cx(
-        "flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border px-3.5",
+        "flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border px-4",
         className,
       )}
     >
-      <span className="eyebrow">{title}</span>
+      <span className="text-[13px] font-medium tracking-[-0.01em] text-fg">{title}</span>
       {right}
     </div>
   );

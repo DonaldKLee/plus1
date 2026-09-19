@@ -41,7 +41,11 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
   if (access.federato !== false) {
     tools.push({
       name: "federato_appetite",
-      doc: `federato_appetite(query) — checks underwriting appetite / whether a risk fits, given a plain-language query.`,
+      doc: `federato_appetite(query?) — the current underwriting queue ranked by appetite (which submissions to quote / refer / decline). Optional query to focus on an account, line of business, or decision.`,
+    });
+    tools.push({
+      name: "federato_account",
+      doc: `federato_account(query) — deep-dive ONE account or policy by name or policy number: the appetite decision, the reason, and any red flags / contradictions in the file.`,
     });
   }
   if (access.files === "read" || access.files === "write") {

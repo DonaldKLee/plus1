@@ -73,11 +73,19 @@ function transcriptOf(c: ChatSession, max = 16): string {
 }
 
 /** Send a user message; run the brain; return Bob's reply message(s). */
-export async function sendChatMessage(id: string, text: string): Promise<{ messages: ChatMessage[] }> {
+export async function sendChatMessage(
+  id: string,
+  text: string,
+  config?: SessionConfig,
+): Promise<{ messages: ChatMessage[] }> {
   const c = chats.get(id);
   if (!c) throw new Error("No such chat");
   const clean = text.trim();
   if (!clean) throw new Error("empty message");
+
+  // Always apply the latest config, so toggling tools in the Goose tab takes
+  // effect on the very next message — no reload, no stale session.
+  if (config) c.config = { ...c.config, ...config };
 
   c.messages.push(msg("user", clean));
 

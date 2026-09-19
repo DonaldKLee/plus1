@@ -6,12 +6,18 @@
 import { runTool, type Decision, type ToolAccess } from "./agentBrain.js";
 import { runFileTool, READ_TOOLS, WRITE_TOOLS, type FileTool } from "./fileTools.js";
 import { runCommand } from "./shellTools.js";
+import { runFederatoTool } from "./federatoTools.js";
 
 export type ToolCall = NonNullable<Decision["tool"]>;
 
 /** Run one tool call, gated by the session's access. Returns a result string. */
 export async function executeTool(t: ToolCall, access: ToolAccess): Promise<string> {
   const name = t.name;
+
+  if (name.startsWith("federato_")) {
+    if (access.federato === false) return "Federato is turned off right now.";
+    return runFederatoTool(name, { query: t.query }).catch((e: Error) => `Federato error: ${e.message}`);
+  }
 
   if (name === "run_command") {
     if (access.files !== "write") return "i don't have write access to run commands right now.";

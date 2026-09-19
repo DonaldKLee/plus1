@@ -225,8 +225,9 @@ app.get("/api/chat/sessions/:id", (req, res) => {
 });
 app.post("/api/chat/sessions/:id/message", async (req, res) => {
   const text = typeof req.body?.text === "string" ? req.body.text : "";
+  const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : undefined;
   try {
-    const out = await sendChatMessage(String(req.params.id), text);
+    const out = await sendChatMessage(String(req.params.id), text, config);
     res.json(out);
   } catch (e) {
     const msg = (e as Error).message;

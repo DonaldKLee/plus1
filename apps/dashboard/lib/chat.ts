@@ -25,7 +25,8 @@ export async function sendChatMessage(id: string, text: string): Promise<ChatMes
   const res = await fetch(`${AGENT_URL}/api/chat/sessions/${id}/message`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text }),
+    // Send the current config every message so tool toggles apply immediately.
+    body: JSON.stringify({ text, config: readGooseConfig() }),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error ?? `Agent returned ${res.status}`);

@@ -2,20 +2,30 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { GooseMark, Button, cx } from "@/components/ui";
+import { GooseMark, Button, Chip, cx } from "@/components/ui";
 import { History, Plug } from "@/components/icons";
 import { createChat, sendChatMessage, type ChatMessage } from "@/lib/chat";
 
-function gooseName(): string {
-  if (typeof window === "undefined") return "Goose";
+function readConfig(): { name?: string; servers?: Record<string, boolean>; localAccess?: string } {
+  if (typeof window === "undefined") return {};
   try {
-    const raw = window.localStorage.getItem("plus1.goose.config");
-    if (!raw) return "Goose";
-    const n = (JSON.parse(raw) as { name?: string }).name?.trim();
-    return n || "Goose";
+    return JSON.parse(window.localStorage.getItem("plus1.goose.config") || "{}");
   } catch {
-    return "Goose";
+    return {};
   }
+}
+
+function gooseName(): string {
+  return readConfig().name?.trim() || "Goose";
+}
+
+type Tools = { federato: boolean; files: "off" | "read" | "write" };
+function readTools(): Tools {
+  const c = readConfig();
+  return {
+    federato: c.servers?.federato !== false,
+    files: !c.servers?.local ? "off" : c.localAccess === "write" ? "write" : "read",
+  };
 }
 
 let localId = 0;
@@ -29,6 +39,7 @@ const mkLocal = (role: ChatMessage["role"], text: string, kind: ChatMessage["kin
 
 export function Chat() {
   const [name] = useState(gooseName);
+  const [tools, setTools] = useState<Tools>({ federato: true, files: "off" });
   const [chatId, setChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -57,6 +68,18 @@ export function Chat() {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, sending]);
 
+  // Keep the tool badges in sync with the Goose tab (which may be edited elsewhere).
+  useEffect(() => {
+    const sync = () => setTools(readTools());
+    sync();
+    window.addEventListener("visibilitychange", sync);
+    window.addEventListener("focus", sync);
+    return () => {
+      window.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("focus", sync);
+    };
+  }, []);
+
   async function send() {
     const text = input.trim();
     if (!text || !chatId || sending) return;
@@ -83,7 +106,26 @@ export function Chat() {
           <GooseMark size={22} className="text-fg" />
           <div className="leading-tight">
             <h1 className="text-[15px] font-semibold tracking-[-0.02em] text-fg">{name}</h1>
-            <p className="text-[12px] text-fg-subtle">live chat · same brain and tools as a meeting</p>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              {tools.federato && <Chip color="var(--act)">federato</Chip>}
+              <Link href="/app/goose" title="configure in the Goose tab">
+                <Chip
+                  color={
+                    tools.files === "write"
+                      ? "var(--live)"
+                      : tools.files === "read"
+                        ? "var(--think)"
+                        : undefined
+                  }
+                >
+                  {tools.files === "off"
+                    ? "files off"
+                    : tools.files === "write"
+                      ? "files · read & write"
+                      : "files · read only"}
+                </Chip>
+              </Link>
+            </div>
           </div>
         </div>
         <Link href="/app/meetings">

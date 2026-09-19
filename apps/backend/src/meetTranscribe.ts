@@ -19,7 +19,8 @@ import { AvatarRig, LiveAvatarClient, type Emote } from "@plus1/liveavatar";
 import { FillerCache, voiceFromEnv, type ElevenLabsTts, type FillerKind } from "@plus1/voice";
 import { env, envOptional } from "./env.js";
 import { joinMeet, launchMeetChrome } from "./meetPresent.js";
-import { GOOSE_NAME, decideAction, postToMeetChat, runTool, type Decision } from "./agentBrain.js";
+import { GOOSE_NAME, decideAction, postToMeetChat, type Decision, type ToolAccess } from "./agentBrain.js";
+import { executeTool } from "./tools.js";
 
 /** Ignore transcription fragments this soon after the goose stopped: they're often its own tail. */
 const BARGE_IN_GUARD_MS = 400;
@@ -126,6 +127,7 @@ export interface SessionConfig {
   confidence?: number; // 0..100 — below this it asks instead of guessing
   guardrails?: { sendApproval?: boolean; noComp?: boolean; noDeadlines?: boolean };
   servers?: Record<string, boolean>;
+  localAccess?: "read" | "write"; // when servers.local is on
 }
 
 /** Configured display name, falling back to the code default. */
@@ -142,6 +144,20 @@ function thresholdOf(s: Session): number {
 function autonomyOf(s: Session): number {
   const a = s.config?.autonomy;
   return typeof a === "number" ? a : 50;
+}
+
+/** Which tools this session may use, from the Goose config's server toggles. */
+function toolAccessOf(s: Session): ToolAccess {
+  const servers = s.config?.servers;
+  const files: ToolAccess["files"] = !servers?.local
+    ? "off"
+    : s.config?.localAccess === "write"
+      ? "write"
+      : "read";
+  return {
+    federato: servers?.federato !== false,
+    files,
+  };
 }
 
 const sessions = new Map<string, Session>();
@@ -272,6 +288,20 @@ export function startMeetTranscription(meetUrl: string, config?: SessionConfig):
   });
 
   return { sessionId: id };
+}
+
+/**
+ * Update a live session's goose config mid-meeting. The brain reads name /
+ * autonomy / confidence / tool access fresh every turn, so a merge here takes
+ * effect on the next decision — no rejoin needed. (The Meet display name is
+ * fixed at join; everything else is live.)
+ */
+export function updateSessionConfig(id: string, patch: SessionConfig): boolean {
+  const s = sessions.get(id);
+  if (!s) return false;
+  s.config = { ...s.config, ...patch };
+  note(s, `Config updated live (name=${nameOf(s)}, autonomy=${autonomyOf(s)}, files=${toolAccessOf(s).files}).`);
+  return true;
 }
 
 export async function stopSession(id: string): Promise<boolean> {
@@ -521,6 +551,7 @@ async function runBrain(s: Session): Promise<void> {
       oneOnOne: isOneOnOne(s),
       name: nameOf(s),
       autonomy: autonomyOf(s),
+      access: toolAccessOf(s),
     });
     const record: DecisionRecord = {
       ...decision,
@@ -596,8 +627,28 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
   }
 
   if (d.action === "tool" && d.tool?.name) {
-    note(s, `Calling tool: ${d.tool.name}(${d.tool.query ?? ""})`);
-    const result = await runTool(d.tool.name, d.tool.query);
+    const t = d.tool;
+    const access = toolAccessOf(s);
+
+    // Never run a tool silently — say what's happening first (audio + transcript).
+    if (d.say) {
+      note(s, `Announcing: "${d.say}"`);
+      try {
+        if (s.rig) {
+          const u = s.rig.speakText(d.say);
+          gooseLine(s, d.say, u.done);
+          await u.done;
+        } else {
+          await postToMeetChat(page, `${nameOf(s)}: ${d.say}`);
+        }
+      } catch (e) {
+        // e.g. LiveAvatar socket dropped mid-utterance — carry on with the tool.
+        note(s, `announce failed (${(e as Error).message}); running the tool anyway`);
+      }
+    }
+
+    note(s, `Tool: ${t.name}(${t.command ?? t.path ?? t.query ?? ""})`);
+    const result = await executeTool(t, access);
     note(s, `Tool result: ${result}`);
     // Share the tool's answer with the room via chat.
     await postToMeetChat(page, `goose — ${result}`);

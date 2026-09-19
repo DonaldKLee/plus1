@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Panel, PanelHead, Input, GooseMark, Chip, Dot, Button, cx } from "@/components/ui";
 import { Shield, Plug, PageMark, Check, Plus } from "@/components/icons";
+import { activeSessionId, updateSessionConfig } from "@/lib/session";
 
 /* --------------------------------------------------------------- model ---- */
 
@@ -274,7 +275,9 @@ export function GooseConfig() {
   const [config, setConfig] = useState<Config>(DEFAULT_CONFIG);
   const [ready, setReady] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [live, setLive] = useState(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const liveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const firstPersist = useRef(true);
 
   useEffect(() => {
@@ -297,6 +300,26 @@ export function GooseConfig() {
     } catch {
       /* storage unavailable — the tab still works for this session */
     }
+    // If a meeting is live, push the change to it (debounced), so settings tune
+    // the goose mid-meeting — no rejoin needed.
+    const sid = activeSessionId();
+    if (sid) {
+      if (liveTimer.current) clearTimeout(liveTimer.current);
+      liveTimer.current = setTimeout(() => {
+        void updateSessionConfig(sid, {
+          name: config.name,
+          autonomy: config.autonomy,
+          confidence: config.confidence,
+          guardrails: config.guardrails,
+          servers: config.servers,
+          localAccess: config.localAccess,
+        }).then((ok) => {
+          if (!ok) return;
+          setLive(true);
+          setTimeout(() => setLive(false), 1800);
+        });
+      }, 500);
+    }
     return () => {
       if (savedTimer.current) clearTimeout(savedTimer.current);
     };
@@ -311,10 +334,10 @@ export function GooseConfig() {
 
   return (
     <div className="flex flex-col gap-6">
-      {saved && (
+      {(saved || live) && (
         <div className="rise-in fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-[var(--r-sm)] border border-border bg-bg-subtle px-3 py-2 text-[12.5px] text-fg-muted shadow-sm">
-          <Check width={14} height={14} className="text-live" />
-          Saved
+          <Dot color="var(--live)" pulse={live} />
+          {live ? "Applied to live meeting" : "Saved"}
         </div>
       )}
 

@@ -64,7 +64,7 @@ export const STATUS_LABEL: Record<SessionStatus, string> = {
 };
 
 /** The goose config saved by the Goose tab, sent to the backend on join. */
-function readGooseConfig(): Record<string, unknown> | undefined {
+export function readGooseConfig(): Record<string, unknown> | undefined {
   if (typeof window === "undefined") return undefined;
   try {
     const raw = window.localStorage.getItem("plus1.goose.config");
@@ -77,9 +77,22 @@ function readGooseConfig(): Record<string, unknown> | undefined {
       confidence: c.confidence,
       guardrails: c.guardrails,
       servers: c.servers,
+      localAccess: c.localAccess,
     };
   } catch {
     return undefined;
+  }
+}
+
+const ACTIVE_KEY = "plus1.activeSession";
+
+/** The most recently joined session, so the Goose tab can tune it mid-meeting. */
+export function activeSessionId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(ACTIVE_KEY);
+  } catch {
+    return null;
   }
 }
 
@@ -92,7 +105,26 @@ export async function joinMeeting(meetUrl: string): Promise<string> {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error ?? `Agent returned ${res.status}`);
-  return json.sessionId as string;
+  const sessionId = json.sessionId as string;
+  try {
+    window.localStorage.setItem(ACTIVE_KEY, sessionId);
+  } catch {
+    /* ignore */
+  }
+  return sessionId;
+}
+
+/** Push updated goose config to a live session (takes effect on the next turn). */
+export async function updateSessionConfig(
+  id: string,
+  config: Record<string, unknown>,
+): Promise<boolean> {
+  const res = await fetch(`${AGENT_URL}/api/meet/sessions/${id}/config`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ config }),
+  }).catch(() => null);
+  return Boolean(res?.ok);
 }
 
 export async function fetchSessions(): Promise<SessionSummary[]> {
@@ -103,6 +135,11 @@ export async function fetchSessions(): Promise<SessionSummary[]> {
 }
 
 export async function leaveSession(id: string): Promise<void> {
+  try {
+    if (activeSessionId() === id) window.localStorage.removeItem(ACTIVE_KEY);
+  } catch {
+    /* ignore */
+  }
   await fetch(`${AGENT_URL}/api/meet/sessions/${id}/leave`, { method: "POST" });
 }
 

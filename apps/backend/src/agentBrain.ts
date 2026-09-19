@@ -22,7 +22,40 @@ export interface Decision {
   reason: string;
   say?: string;
   chatMessage?: string;
-  tool?: { name: string; query?: string };
+  tool?: { name: string; query?: string; path?: string; content?: string; command?: string };
+}
+
+/** Which tools this session may use. Built from the dashboard Goose config. */
+export interface ToolAccess {
+  federato?: boolean;
+  files?: "off" | "read" | "write";
+}
+
+interface ToolSpec {
+  name: string;
+  doc: string;
+}
+
+function toolCatalog(access: ToolAccess): ToolSpec[] {
+  const tools: ToolSpec[] = [];
+  if (access.federato !== false) {
+    tools.push({
+      name: "federato_appetite",
+      doc: `federato_appetite(query) — checks underwriting appetite / whether a risk fits, given a plain-language query.`,
+    });
+  }
+  if (access.files === "read" || access.files === "write") {
+    tools.push({ name: "list_files", doc: `list_files(path?) — list files in the team's shared folder (path optional).` });
+    tools.push({ name: "read_file", doc: `read_file(path) — read a text file from the shared folder.` });
+  }
+  if (access.files === "write") {
+    tools.push({ name: "write_file", doc: `write_file(path, content) — save text to a file in the shared folder (e.g. notes, action items, a draft).` });
+    tools.push({
+      name: "run_command",
+      doc: `run_command(command) — run a shell command on the user's machine to actually get something done that the file tools can't (create a PDF, convert a file, open an app, etc). Set tool.command to the exact bash command.`,
+    });
+  }
+  return tools;
 }
 
 const AGENT_NAME = "goose";
@@ -40,8 +73,14 @@ function autonomyStance(autonomy: number): string {
   return `You are PROACTIVE. Speak up whenever you can genuinely help, volunteer for open tasks, and treat a group like a normal back-and-forth — but always defer instantly to a human who wants to take something.`;
 }
 
-function buildSystemPrompt(opts: { name: string; autonomy: number }): string {
+function buildSystemPrompt(opts: { name: string; autonomy: number; tools: ToolSpec[] }): string {
   const name = opts.name;
+  const hasTools = opts.tools.length > 0;
+  const toolsSection = hasTools
+    ? `- "tool": call a tool to look something up or act. Set tool.name plus its arguments (query, path, content, and/or command). ALWAYS also set "say" to a short, natural line telling the room what you're about to do BEFORE it happens (e.g. "let me check the downloads folder" / "one sec, making that pdf now") — a tool call must never be silent.
+Available tools:
+${opts.tools.map((t) => `  - ${t.doc}`).join("\n")}`
+    : `You have no tools available right now.`;
   return `You are "${name}", an AI teammate attending a live meeting as a real participant — not a bot.
 You are given the most recent lines of the meeting transcript. Decide what to do RIGHT NOW.
 
@@ -63,51 +102,63 @@ Your stance: ${autonomyStance(opts.autonomy)}
 Actions:
 - "speak": say something out loud in the room. Put the words in "say".
 - "chat": post a message to the meeting text chat (use this when asked to "put it in the chat", or to share a draft / link / longer text). Put the text in "chatMessage".
-- "tool": call a tool to look something up. Set tool.name and tool.query.
-Available tools: federato_appetite(query) — checks underwriting appetite / whether a risk fits, given a plain-language query.
+${toolsSection}
 
 Set confidence 0..1 for how sure you are that acting now is the right call.`;
 }
 
 const ONE_ON_ONE_NOTE = `\n\nIMPORTANT: This is a one-on-one — only you and ONE other person are in the meeting, so everything they say is spoken directly to you. Respond to them, almost always with action="speak", as you would in a normal back-and-forth conversation. Only stay silent (action="none") if they clearly didn't say anything needing a response (e.g. filler like "um" or "one sec"). Default confidence should be high.`;
 
-const RESPONSE_SCHEMA = {
-  type: "object",
-  properties: {
-    act: { type: "boolean" },
-    action: { type: "string", enum: ["speak", "chat", "tool", "none"] },
-    confidence: { type: "number" },
-    reason: { type: "string" },
-    say: { type: "string" },
-    chatMessage: { type: "string" },
-    tool: {
+const CHAT_NOTE = `\n\nIMPORTANT: You are in a direct TEXT CHAT with one person — often a broker asking for help, or someone testing you. It is not a live meeting. Every message is addressed to you, so reply to each one (use action="speak" — the words in "say" are shown as your chat reply). Use tools whenever they help, and always narrate what you're doing. If the request would go much better live — you need to walk them through something, screen-share, or it's turning into real back-and-forth — offer to hop on a meeting together. Default confidence should be high.`;
+
+function buildResponseSchema(tools: ToolSpec[]) {
+  const actions = tools.length > 0 ? ["speak", "chat", "tool", "none"] : ["speak", "chat", "none"];
+  const schema: Record<string, unknown> = {
+    type: "object",
+    properties: {
+      act: { type: "boolean" },
+      action: { type: "string", enum: actions },
+      confidence: { type: "number" },
+      reason: { type: "string" },
+      say: { type: "string" },
+      chatMessage: { type: "string" },
+    },
+    required: ["act", "action", "confidence", "reason"],
+  };
+  if (tools.length > 0) {
+    (schema.properties as Record<string, unknown>).tool = {
       type: "object",
       properties: {
-        name: { type: "string", enum: ["federato_appetite"] },
+        name: { type: "string", enum: tools.map((t) => t.name) },
         query: { type: "string" },
+        path: { type: "string" },
+        content: { type: "string" },
+        command: { type: "string" },
       },
-    },
-  },
-  required: ["act", "action", "confidence", "reason"],
-} as const;
+    };
+  }
+  return schema;
+}
 
 /** Ask Gemini whether to act on the current transcript window. */
 export async function decideAction(
   transcript: string,
-  opts?: { oneOnOne?: boolean; name?: string; autonomy?: number },
+  opts?: { oneOnOne?: boolean; name?: string; autonomy?: number; access?: ToolAccess; channel?: "meeting" | "chat" },
 ): Promise<Decision> {
   const key = env("GEMINI_API_KEY");
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${DECIDE_MODEL}:generateContent?key=${key}`;
   const name = opts?.name?.trim() || GOOSE_NAME;
   const autonomy = typeof opts?.autonomy === "number" ? opts.autonomy : 50;
-  const systemText = buildSystemPrompt({ name, autonomy }) + (opts?.oneOnOne ? ONE_ON_ONE_NOTE : "");
+  const tools = toolCatalog(opts?.access ?? {});
+  const channelNote = opts?.channel === "chat" ? CHAT_NOTE : opts?.oneOnOne ? ONE_ON_ONE_NOTE : "";
+  const systemText = buildSystemPrompt({ name, autonomy, tools }) + channelNote;
   const body = {
     systemInstruction: { parts: [{ text: systemText }] },
     contents: [{ role: "user", parts: [{ text: `Recent transcript:\n${transcript}` }] }],
     generationConfig: {
       temperature: 0.2,
       responseMimeType: "application/json",
-      responseSchema: RESPONSE_SCHEMA,
+      responseSchema: buildResponseSchema(tools),
     },
   };
 

@@ -5,7 +5,9 @@ import { Button, Input, Panel, PanelHead, cx } from "@/components/ui";
 import { Check, Close, Alert } from "@/components/icons";
 
 const AGENT =
-  process.env.NEXT_PUBLIC_FEDERATO_AGENT_URL ?? "http://localhost:8787";
+  process.env.NEXT_PUBLIC_BACKEND_URL ??
+  process.env.NEXT_PUBLIC_FEDERATO_AGENT_URL ??
+  "http://localhost:8787";
 
 type Factor = {
   factor: string;
@@ -256,7 +258,7 @@ export function Underwrite() {
           <p className="mt-1.5 pl-[22px] text-[12.5px] text-fg-muted">
             Start the agent with{" "}
             <code className="tnum rounded bg-bg-raise px-1.5 py-0.5 text-fg">
-              npm run federato
+              npm run backend
             </code>{" "}
             from the repo root.
           </p>

@@ -10,7 +10,7 @@
 
 ```
 apps/dashboard/        Next.js — setup, integrations, live console, **UW tab**
-apps/federato-agent/   Federato API + Browserbase work browser + screenshare helper
+apps/backend/          Federato API + Browserbase work browser + screenshare helper
 apps/runner/           Node + Playwright — joins Meet as the goose (LiveAvatar camera/mic), captions, barge-in, control API :8790
 workers/               Hono API + MeetingSession DO (not yet)
 packages/brain         gate/planner + **federato appetite + query plan** (pure)
@@ -23,8 +23,8 @@ packages/voice         ElevenLabs streaming TTS -> PCM 24 kHz + cached fillers (
 ## Federato pack (feat/federato-browserbase)
 
 - Pure scoring in `packages/brain/src/federato` — never import fetch there.
-- Network + Browserbase only in `apps/federato-agent`.
-- Dashboard UW tab polls `NEXT_PUBLIC_FEDERATO_AGENT_URL` (default `:8787`).
+- Network + Browserbase only in `apps/backend`.
+- Dashboard UW tab polls `NEXT_PUBLIC_BACKEND_URL` (default `:8787`).
 - Camera/goose is teammate-owned; screenshare = Present Browserbase live-view tab.
 
 
@@ -33,7 +33,7 @@ packages/voice         ElevenLabs streaming TTS -> PCM 24 kHz + cached fillers (
 The core product flow, end to end:
 
 1. Dashboard `/app` — paste a Meet link, "Send the goose" → `POST /api/meet/join`.
-2. `apps/federato-agent/src/meetTranscribe.ts` — launches a local Playwright Chrome
+2. `apps/backend/src/meetTranscribe.ts` — launches a local Playwright Chrome
    (`launchMeetChrome`), joins the Meet (`joinMeet` from `meetPresent.ts`), and taps every
    remote audio stream via Web Audio. 16kHz PCM streams continuously over the **Gemini Live API**
    (WebSocket, `gemini-3.5-transcribe-live`); lines surface ~1-2s after each speaker pauses.
@@ -42,7 +42,7 @@ The core product flow, end to end:
    in `components/console/LiveTranscript.tsx` at `/app/meetings/[id]`.
 
 `GEMINI_API_KEY` in `.env`. First run needs a one-time Google sign-in in the headed Chrome
-profile (`npm run google-login` in `apps/federato-agent`, or just sign in when the window opens).
+profile (`npm run backend:google-login`, or just sign in when the window opens).
 
 All prior fixture/dummy data (personas, integrations, replay demo) has been removed; the dashboard
 is Home / Meetings / Underwrite only.
@@ -62,8 +62,8 @@ Read `packages/liveavatar/README.md` before touching the media path.
 ## Running it
 
 ```bash
-# terminal 1 — the agent that joins + transcribes
-cd apps/federato-agent && npm install && npm run dev   # :8787
+# terminal 1 — the backend that joins + transcribes
+cd apps/backend && npm install && npm run dev           # :8787
 
 # terminal 2 — the dashboard
 cd apps/dashboard && npm install && npm run dev         # http://localhost:3000

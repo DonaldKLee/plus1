@@ -16,7 +16,7 @@ The goose / camera / LiveAvatar seat is a teammate piece. This branch is the UW 
 
 ```
 apps/dashboard         Next.js console — open the UW tab
-apps/federato-agent    Federato API + Browserbase + Meet Present
+apps/backend           Federato API + Browserbase + Meet Present
 packages/brain         Appetite + query plan (no network)
 packages/protocol      Shared zod types
 ```
@@ -29,7 +29,7 @@ cp .env.example .env          # paste keys (see teammate .env, not this file)
 npm install                   # from repo root
 ```
 
-Dashboard talks to the agent at `http://localhost:8787` (`apps/dashboard/.env.local.example`).
+Dashboard talks to the backend at `http://localhost:8787` (`apps/dashboard/.env.local.example`).
 
 The goose's face and voice come from `packages/liveavatar` (HeyGen LiveAvatar on the Meet tab's
 fake camera/mic) and `packages/voice` (ElevenLabs → PCM). No virtual audio devices needed: set
@@ -52,14 +52,14 @@ Do **not** commit `.env`. Send keys in chat/DM.
 Two terminals from the repo root:
 
 ```bash
-npm run federato              # agent http://localhost:8787
+npm run backend               # backend http://localhost:8787
 npm run dashboard             # UI     http://localhost:3000
 ```
 
 Optional cache refresh (schema + ~27 property policies):
 
 ```bash
-npm run federato:cache
+npm run backend:cache
 ```
 
 Open **http://localhost:3000 → UW tab**.
@@ -77,18 +77,18 @@ Open **http://localhost:3000 → UW tab**.
 Playwright cannot see your everyday Chrome. Sign in **once** in the plus1 profile:
 
 ```bash
-npm run federato:google-login
+npm run backend:google-login
 ```
 
-Sign into Google in the headed window that opens. Session is saved at `apps/federato-agent/cache/screenshare-profile` (gitignored). Reuse it on later runs unless you delete that folder.
+Sign into Google in the headed window that opens. Session is saved at `apps/backend/cache/screenshare-profile` (gitignored). Reuse it on later runs unless you delete that folder.
 
 ## Join Meet + Present
 
 1. Put `MEET_URL` in `.env` **or** paste the Meet link in the UW input.
-2. First time: `npm run federato:google-login`.
+2. First time: `npm run backend:google-login`.
 3. Then either:
    ```bash
-   MEET_URL=https://meet.google.com/xxx-yyyy-zzz npm run federato:screenshare
+   MEET_URL=https://meet.google.com/xxx-yyyy-zzz npm run backend:screenshare
    ```
    or UW → **Join Meet & Present**.
 
@@ -119,12 +119,12 @@ curl -X POST http://localhost:8787/api/federato/present-meet \
 
 | Script | |
 |--------|--|
-| `npm run federato` | Agent `:8787` |
+| `npm run backend` | Backend `:8787` |
 | `npm run dashboard` | Dashboard `:3000` |
-| `npm run federato:cache` | Refresh schema + policies |
-| `npm run federato:rank` | CLI rank |
-| `npm run federato:google-login` | One-time Google sign-in |
-| `npm run federato:screenshare` | Live view + join + Present |
+| `npm run backend:cache` | Refresh schema + policies |
+| `npm run backend:rank` | CLI rank |
+| `npm run backend:google-login` | One-time Google sign-in |
+| `npm run backend:screenshare` | Live view + join + Present |
 | `npm run test:brain` | Appetite unit tests |
 
-More detail: [apps/federato-agent/README.md](apps/federato-agent/README.md). Architecture notes: [HLD.md](HLD.md), [CLAUDE.md](CLAUDE.md).
+More detail: [apps/backend/README.md](apps/backend/README.md). Architecture notes: [HLD.md](HLD.md), [CLAUDE.md](CLAUDE.md).

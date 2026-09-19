@@ -1,8 +1,10 @@
-// Client for the federato-agent "send a goose" transcription endpoints.
-// The agent joins the Meet, transcribes with Gemini, and streams lines over SSE.
+// Client for the backend "send a goose" transcription endpoints.
+// The backend joins the Meet, transcribes with Gemini, and streams lines over SSE.
 
 export const AGENT_URL =
-  process.env.NEXT_PUBLIC_FEDERATO_AGENT_URL ?? "http://localhost:8787";
+  process.env.NEXT_PUBLIC_BACKEND_URL ??
+  process.env.NEXT_PUBLIC_FEDERATO_AGENT_URL ??
+  "http://localhost:8787";
 
 export type SessionStatus =
   | "joining"
@@ -61,11 +63,32 @@ export const STATUS_LABEL: Record<SessionStatus, string> = {
   error: "Error",
 };
 
+/** The goose config saved by the Goose tab, sent to the backend on join. */
+function readGooseConfig(): Record<string, unknown> | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const raw = window.localStorage.getItem("plus1.goose.config");
+    if (!raw) return undefined;
+    const c = JSON.parse(raw) as Record<string, unknown>;
+    // Only the fields the backend actually reads.
+    return {
+      name: c.name,
+      autonomy: c.autonomy,
+      confidence: c.confidence,
+      guardrails: c.guardrails,
+      servers: c.servers,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function joinMeeting(meetUrl: string): Promise<string> {
+  const config = readGooseConfig();
   const res = await fetch(`${AGENT_URL}/api/meet/join`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ meetUrl }),
+    body: JSON.stringify({ meetUrl, config }),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error ?? `Agent returned ${res.status}`);

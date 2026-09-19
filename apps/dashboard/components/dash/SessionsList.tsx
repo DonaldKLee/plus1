@@ -71,7 +71,7 @@ export function SessionsList({ limit }: { limit?: number }) {
       <div className="rounded-[var(--r)] border border-border">
         <Empty
           title="Agent not reachable"
-          body="Start the federato-agent (npm run dev in apps/federato-agent) so the goose can join meetings."
+          body="Start the backend (npm run backend) so the goose can join meetings."
         />
       </div>
     );

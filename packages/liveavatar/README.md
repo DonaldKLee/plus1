@@ -42,7 +42,7 @@ Consequence: **LiveAvatar does not do TTS for us.** `packages/voice` produces PC
 
 ## Where it's wired in
 
-`apps/federato-agent/src/meetTranscribe.ts` owns the meeting session (join, Gemini Live
+`apps/backend/src/meetTranscribe.ts` owns the meeting session (join, Gemini Live
 transcription, SSE to the dashboard) and hosts the rig: `rig.prepare(page)` before `goto`,
 `rig.start()` on the prejoin screen, `rig.reattach()` on page reloads, `rig.interrupt()` when a
 room transcription fragment arrives mid-speech. The agent exposes, per session:

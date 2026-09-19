@@ -9,6 +9,7 @@ import {
   fmtClock,
   leaveSession,
   streamUrl,
+  type DecisionRecord,
   type SessionStatus,
   type TranscriptLine,
 } from "@/lib/session";
@@ -21,11 +22,22 @@ const STATUS_COLOR: Record<SessionStatus, string> = {
   error: "var(--alert)",
 };
 
+const ACTION_META: Record<
+  DecisionRecord["action"],
+  { label: string; color: string }
+> = {
+  speak: { label: "Speak", color: "var(--act, #4ade80)" },
+  chat: { label: "Chat", color: "var(--brand)" },
+  tool: { label: "Tool", color: "#c084fc" },
+  none: { label: "Hold", color: "var(--fg-subtle)" },
+};
+
 export function LiveTranscript({ sessionId }: { sessionId: string }) {
   const [status, setStatus] = useState<SessionStatus>("joining");
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
   const [lines, setLines] = useState<TranscriptLine[]>([]);
+  const [decisions, setDecisions] = useState<DecisionRecord[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -47,6 +59,16 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
         return next;
       });
     });
+    es.addEventListener("decision", (e) => {
+      const d = JSON.parse((e as MessageEvent).data) as DecisionRecord;
+      setDecisions((prev) => {
+        const i = prev.findIndex((x) => x.id === d.id);
+        if (i === -1) return [...prev, d];
+        const next = prev.slice();
+        next[i] = d; // outcome updates in place
+        return next;
+      });
+    });
     es.addEventListener("note", (e) => {
       const d = JSON.parse((e as MessageEvent).data) as { msg: string };
       setNotes((prev) => [...prev.slice(-20), d.msg]);
@@ -65,6 +87,7 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
 
   const live = status === "listening";
   const working = status === "joining" || status === "waiting-admit";
+  const acted = decisions.filter((d) => d.outcome && d.outcome !== "held" && d.outcome !== "below threshold");
 
   return (
     <div className="flex min-h-0 flex-1 flex-col p-3 lg:p-4">
@@ -87,83 +110,137 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
             {STATUS_LABEL[status]}
           </span>
           {(live || working) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => leaveSession(sessionId)}
-            >
+            <Button variant="ghost" size="sm" onClick={() => leaveSession(sessionId)}>
               Leave call
             </Button>
           )}
         </div>
       </div>
 
-      <Panel as="section" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <PanelHead
-          title="Live transcript"
-          right={
-            <span className="tnum text-[12px] text-fg-subtle">
-              {lines.length} lines
-            </span>
-          }
-        />
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+        {/* Transcript */}
+        <Panel as="section" className="flex min-h-0 flex-col overflow-hidden">
+          <PanelHead
+            title="Live transcript"
+            right={<span className="tnum text-[12px] text-fg-subtle">{lines.length} lines</span>}
+          />
 
-        {notes.length > 0 && (live || working) && (
-          <p className="tnum border-b border-border px-4 py-1.5 text-[11.5px] text-fg-subtle">
-            {notes[notes.length - 1]}
-          </p>
-        )}
-
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {error && (
-            <p
-              className="px-4 py-3 text-[13px]"
-              style={{ color: "var(--alert)" }}
-            >
-              {error}
+          {notes.length > 0 && (live || working) && (
+            <p className="tnum border-b border-border px-4 py-1.5 text-[11.5px] text-fg-subtle">
+              {notes[notes.length - 1]}
             </p>
           )}
 
-          {lines.length === 0 && !error && (
-            <div className="px-4 py-12 text-center">
-              <p className="text-[13.5px] text-fg-muted">
-                {working
-                  ? "The goose is joining the room…"
-                  : status === "ended"
-                    ? "This session has ended."
-                    : "Listening. Transcript will appear as people speak."}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {error && (
+              <p className="px-4 py-3 text-[13px]" style={{ color: "var(--alert)" }}>
+                {error}
               </p>
-              {notes.length > 0 && (
-                <p className="tnum mx-auto mt-2 max-w-[60ch] text-[12px] leading-relaxed text-fg-subtle">
-                  {notes[notes.length - 1]}
-                </p>
-              )}
-            </div>
-          )}
+            )}
 
-          {lines.map((l) => (
-            <article
-              key={l.id}
-              className="rise-in flex items-start gap-3 border-b border-border px-4 py-3 last:border-b-0"
-            >
-              <span className="tnum mt-[2px] shrink-0 text-[11px] text-fg-subtle">
-                {fmtClock(l.t)}
-              </span>
-              <p className="text-[13.5px] leading-relaxed text-fg">
-                {l.text}
-                {l.partial && (
-                  <span
-                    className="ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[2px] animate-pulse"
-                    style={{ background: "var(--live)" }}
-                    aria-hidden
-                  />
-                )}
+            {lines.length === 0 && !error && (
+              <div className="px-4 py-12 text-center">
+                <p className="text-[13.5px] text-fg-muted">
+                  {working
+                    ? "The goose is joining the room…"
+                    : status === "ended"
+                      ? "This session has ended."
+                      : "Listening. Transcript will appear as people speak."}
+                </p>
+              </div>
+            )}
+
+            {lines.map((l) => (
+              <article
+                key={l.id}
+                className="rise-in flex items-start gap-3 border-b border-border px-4 py-3 last:border-b-0"
+              >
+                <span className="tnum mt-[2px] shrink-0 text-[11px] text-fg-subtle">
+                  {fmtClock(l.t)}
+                </span>
+                <p
+                  className="text-[13.5px] leading-relaxed"
+                  style={{ color: l.agent ? "var(--brand)" : "var(--fg)" }}
+                >
+                  {l.agent && <span className="mr-1.5 font-medium">goose:</span>}
+                  {l.text}
+                  {l.partial && (
+                    <span
+                      className="ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[2px] animate-pulse"
+                      style={{ background: "var(--live)" }}
+                      aria-hidden
+                    />
+                  )}
+                </p>
+              </article>
+            ))}
+            <div ref={endRef} />
+          </div>
+        </Panel>
+
+        {/* Decisions */}
+        <Panel as="section" className="flex min-h-0 flex-col overflow-hidden">
+          <PanelHead
+            title="Goose decisions"
+            right={<span className="tnum text-[12px] text-fg-subtle">{acted.length} acted</span>}
+          />
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {decisions.length === 0 && (
+              <p className="px-4 py-10 text-center text-[13px] text-fg-subtle">
+                The goose reads every line and decides whether to speak, chat, or
+                call a tool. Its reasoning shows up here.
               </p>
-            </article>
-          ))}
-          <div ref={endRef} />
-        </div>
-      </Panel>
+            )}
+            {decisions
+              .slice()
+              .reverse()
+              .map((d) => {
+                const meta = ACTION_META[d.action];
+                const didAct = d.outcome && d.outcome !== "held" && d.outcome !== "below threshold";
+                return (
+                  <article key={d.id} className="rise-in border-b border-border px-4 py-3 last:border-b-0">
+                    <div className="mb-1 flex items-center gap-2">
+                      <span
+                        className="rounded-[var(--r-sm)] px-1.5 py-0.5 text-[11px] font-medium"
+                        style={{
+                          color: meta.color,
+                          background: `color-mix(in srgb, ${meta.color} 14%, transparent)`,
+                        }}
+                      >
+                        {meta.label}
+                      </span>
+                      <span className="tnum text-[11px] text-fg-subtle">
+                        {Math.round(d.confidence * 100)}%
+                      </span>
+                      <span className="tnum ml-auto text-[11px] text-fg-subtle">
+                        {fmtClock(d.t)}
+                      </span>
+                    </div>
+                    <p className="text-[12.5px] leading-snug text-fg-muted">{d.reason}</p>
+                    {(d.say || d.chatMessage) && (
+                      <p className="mt-1.5 text-[13px] italic leading-snug text-fg">
+                        “{d.say ?? d.chatMessage}”
+                      </p>
+                    )}
+                    {d.tool?.name && (
+                      <p className="tnum mt-1.5 text-[12px] text-fg-muted">
+                        {d.tool.name}({d.tool.query ?? ""})
+                      </p>
+                    )}
+                    {d.outcome && (
+                      <p
+                        className="mt-1.5 text-[11.5px] font-medium"
+                        style={{ color: didAct ? meta.color : "var(--fg-subtle)" }}
+                      >
+                        {d.outcome}
+                      </p>
+                    )}
+                  </article>
+                );
+              })}
+          </div>
+        </Panel>
+      </div>
     </div>
   );
 }

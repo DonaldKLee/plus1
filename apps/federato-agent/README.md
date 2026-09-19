@@ -1,31 +1,32 @@
-## Federato underwriting pack (this branch)
+## Federato agent (`:8787`)
 
-### Packages
-- `packages/brain` — pure appetite scoring + query planning (no network)
-- `packages/protocol` — shared types for rank / deep-dive / browse
-- `apps/federato-agent` — Auth0 + Federato query, Browserbase work browser, screenshare helper
-- `apps/dashboard` — **UW** nav tab consumes the agent API (does not replace Console)
+Network + Browserbase + Meet live here. Scoring stays in `packages/brain` (no fetch).
 
 ### Setup
+
+From repo root:
+
 ```bash
-cp .env.example .env   # fill Federato + optional Browserbase keys
-npm install            # from repo root (workspaces)
-npm run federato:cache # schema + property policies → apps/federato-agent/cache
-npm run federato       # API on :8787
-npm run dashboard      # UI on :3000 → open UW tab
+cp .env.example .env    # Federato + Browserbase + MEET_URL
+npm install
+npm run federato        # this app
 ```
 
 ### Screenshare (Playwright joins Meet + Presents live view)
+
 ```bash
-# needs BROWSERBASE_API_KEY + BROWSERBASE_PROJECT_ID
+npm run federato:google-login    # once — sign in in the headed Chrome
 MEET_URL=https://meet.google.com/xxx-yyyy-zzz npm run federato:screenshare
 ```
-Opens Browserbase live view, joins Meet, clicks Present, auto-selects the work tab.
-First run: sign into Google in the headed Chrome window (profile is reused).
+
+Or `POST /api/federato/present-meet` with `{ policyId, meetUrl }`.
+
+Opens Browserbase fullscreen live view, joins Meet as the saved profile, Presents tab `plus1-work`.
 Camera/goose stays teammate-owned.
 
 ### Demo path
+
 1. Rank queue (schema → planned queries → 2025 appetite table)
-2. Deep-dive Harbor Point (`PR-2025-1001`) — premium/construction/loss/multi-state fails
-3. Browserbase live view on `44 Cedar Ln, Tampa, FL` (Maps + FEMA)
+2. Deep-dive Harbor Point (`PR-2025-1001`)
+3. Browserbase Maps + FEMA for the policy address
 4. Present live view in Meet

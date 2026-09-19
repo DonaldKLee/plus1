@@ -21,7 +21,9 @@ import {
   startMeetTranscription,
   stopSession,
   subscribe,
+  updateSessionConfig,
 } from "./meetTranscribe.js";
+import { createChat, getChat, sendChatMessage, updateChatConfig } from "./chat.js";
 import { deleteMeeting, meetingStats, searchMeetings, storeEnabled } from "./store.js";
 
 const app = express();
@@ -234,6 +236,42 @@ app.post("/api/meet/sessions/:id/filler", gooseRoute((id, b) => fillerInSession(
 app.post("/api/meet/sessions/:id/interrupt", gooseRoute((id) => { interruptSession(id); }));
 app.post("/api/meet/sessions/:id/honk", gooseRoute((id) => honkSession(id)));
 app.post("/api/meet/sessions/:id/emote", gooseRoute((id, b) => emoteSession(id, b.emote ?? "idle")));
+app.post("/api/meet/sessions/:id/config", gooseRoute((id, b) => {
+  const config = b?.config && typeof b.config === "object" ? b.config : b;
+  const ok = updateSessionConfig(id, config ?? {});
+  if (!ok) throw new Error("No such session");
+  return { ok: true };
+}));
+
+// ── Live chat with the goose (no meeting) ───────────────────────────────────
+app.post("/api/chat/sessions", (req, res) => {
+  const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : undefined;
+  res.json(createChat(config));
+});
+app.get("/api/chat/sessions/:id", (req, res) => {
+  const c = getChat(String(req.params.id));
+  if (!c) {
+    res.status(404).json({ error: "No such chat" });
+    return;
+  }
+  res.json({ id: c.id, messages: c.messages });
+});
+app.post("/api/chat/sessions/:id/message", async (req, res) => {
+  const text = typeof req.body?.text === "string" ? req.body.text : "";
+  const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : undefined;
+  try {
+    const out = await sendChatMessage(String(req.params.id), text, config);
+    res.json(out);
+  } catch (e) {
+    const msg = (e as Error).message;
+    res.status(/No such chat/.test(msg) ? 404 : 400).json({ error: msg });
+  }
+});
+app.post("/api/chat/sessions/:id/config", (req, res) => {
+  const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : req.body;
+  const ok = updateChatConfig(String(req.params.id), config ?? {});
+  res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: "No such chat" });
+});
 app.get("/api/meet/sessions/:id/avatar", (req, res) => {
   const st = avatarStatus(req.params.id);
   if (!st) { res.status(404).json({ error: "No such session" }); return; }

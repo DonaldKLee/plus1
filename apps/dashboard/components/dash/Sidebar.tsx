@@ -4,10 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Wordmark, cx } from "@/components/ui";
-import { Home, History, Menu, Close, Shield, Sliders } from "@/components/icons";
+import { Home, History, Menu, Close, Shield, Sliders, Chat } from "@/components/icons";
 
 const NAV = [
   { href: "/app", label: "Home", Icon: Home },
+  { href: "/app/chat", label: "Chat", Icon: Chat },
   { href: "/app/meetings", label: "Meetings", Icon: History },
   { href: "/app/underwrite", label: "Underwrite", Icon: Shield },
   { href: "/app/goose", label: "Goose", Icon: Sliders },

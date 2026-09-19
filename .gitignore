@@ -13,3 +13,6 @@ apps/backend/cache/
 !.env.example
 *.tsbuildinfo
 apps/runner-profile/
+
+# Goose local file-access sandbox
+goose-files/

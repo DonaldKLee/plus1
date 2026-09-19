@@ -19,7 +19,8 @@ import { AvatarRig, LiveAvatarClient, type Emote } from "@plus1/liveavatar";
 import { FillerCache, voiceFromEnv, type ElevenLabsTts, type FillerKind } from "@plus1/voice";
 import { env, envOptional } from "./env.js";
 import { joinMeet, launchMeetChrome } from "./meetPresent.js";
-import { GOOSE_NAME, decideAction, postToMeetChat, runTool, type Decision } from "./agentBrain.js";
+import { GOOSE_NAME, decideAction, postToMeetChat, type Decision, type ToolAccess } from "./agentBrain.js";
+import { executeTool } from "./tools.js";
 import { getMeeting, listMeetings, saveMeeting, storeEnabled } from "./store.js";
 
 /** Ignore transcription fragments this soon after the goose stopped: they're often its own tail. */
@@ -118,6 +119,8 @@ interface Session {
   avatar: AvatarStatus;
   lastSpeechEndedAt: number;
   config?: SessionConfig; // from the dashboard's Goose tab
+  memory: string[]; // standing instructions + facts to honor every turn
+  muted?: boolean; // chat-only mode: keep listening, but type instead of speak
 }
 
 /** Per-session goose configuration, sent from the dashboard on join. */
@@ -127,6 +130,7 @@ export interface SessionConfig {
   confidence?: number; // 0..100 — below this it asks instead of guessing
   guardrails?: { sendApproval?: boolean; noComp?: boolean; noDeadlines?: boolean };
   servers?: Record<string, boolean>;
+  localAccess?: "read" | "write"; // when servers.local is on
 }
 
 /** Configured display name, falling back to the code default. */
@@ -143,6 +147,20 @@ function thresholdOf(s: Session): number {
 function autonomyOf(s: Session): number {
   const a = s.config?.autonomy;
   return typeof a === "number" ? a : 50;
+}
+
+/** Which tools this session may use, from the Goose config's server toggles. */
+function toolAccessOf(s: Session): ToolAccess {
+  const servers = s.config?.servers;
+  const files: ToolAccess["files"] = !servers?.local
+    ? "off"
+    : s.config?.localAccess === "write"
+      ? "write"
+      : "read";
+  return {
+    federato: servers?.federato !== false,
+    files,
+  };
 }
 
 const sessions = new Map<string, Session>();
@@ -340,6 +358,7 @@ export function startMeetTranscription(meetUrl: string, config?: SessionConfig):
     avatar: { session: "idle", media: "idle", speaking: false },
     lastSpeechEndedAt: 0,
     config,
+    memory: [],
   };
   session.bus.setMaxListeners(50);
   sessions.set(id, session);
@@ -352,6 +371,20 @@ export function startMeetTranscription(meetUrl: string, config?: SessionConfig):
   });
 
   return { sessionId: id };
+}
+
+/**
+ * Update a live session's goose config mid-meeting. The brain reads name /
+ * autonomy / confidence / tool access fresh every turn, so a merge here takes
+ * effect on the next decision — no rejoin needed. (The Meet display name is
+ * fixed at join; everything else is live.)
+ */
+export function updateSessionConfig(id: string, patch: SessionConfig): boolean {
+  const s = sessions.get(id);
+  if (!s) return false;
+  s.config = { ...s.config, ...patch };
+  note(s, `Config updated live (name=${nameOf(s)}, autonomy=${autonomyOf(s)}, files=${toolAccessOf(s).files}).`);
+  return true;
 }
 
 export async function stopSession(id: string): Promise<boolean> {
@@ -547,6 +580,41 @@ const REQUEST_RE =
 const OPEN_TASK_RE =
   /\b(can someone|could someone|who can|who wants|we should|we need to|someone needs to|let'?s|to-?do|action item|any volunteers|who'?s going to)\b/i;
 
+// "mute / use the chat" and "unmute / talk again" — a spoken output-mode toggle.
+const MUTE_RE =
+  /\b(mute yourself|mute|be quiet|stay quiet|stop talking|stop speaking|don'?t talk|quit talking|use (the )?chat|just (use )?(the )?chat|chat only|type it|put it in (the )?chat)\b/i;
+const UNMUTE_RE =
+  /\b(unmute|you can talk|talk again|start talking|speak up|out loud|use your voice|voice again|talk to us)\b/i;
+
+/** A spoken command to switch output mode, or null. Checked only when addressed. */
+function detectModeCommand(text: string): "chat" | "voice" | null {
+  if (UNMUTE_RE.test(text)) return "voice";
+  if (MUTE_RE.test(text)) return "chat";
+  return null;
+}
+
+function latestHumanText(s: Session): string {
+  for (let i = s.lines.length - 1; i >= 0; i--) {
+    const l = s.lines[i]!;
+    if (!l.partial && !l.agent) return l.text;
+  }
+  return "";
+}
+
+const MEMORY_CAP = 24;
+/** Merge new things-to-remember into the session's standing memory. */
+function rememberFrom(s: Session, items?: string[]): void {
+  if (!items?.length) return;
+  for (const raw of items) {
+    const item = raw.trim();
+    if (!item) continue;
+    if (s.memory.some((m) => m.toLowerCase() === item.toLowerCase())) continue;
+    s.memory.push(item);
+    note(s, `Remembering: "${item}"`);
+  }
+  if (s.memory.length > MEMORY_CAP) s.memory = s.memory.slice(-MEMORY_CAP);
+}
+
 /** Addressed by the "goose"/"plus one" aliases or the session's configured name. */
 function isAddressed(s: Session, text: string): boolean {
   if (ADDRESSED_RE.test(text)) return true;
@@ -567,9 +635,11 @@ function worthConsidering(s: Session): boolean {
   const recent = s.lines.filter((l) => !l.partial && !l.agent).slice(-2);
   const text = recent.map((l) => l.text).join(" ");
   if (!text.trim()) return false;
-  // Proactive (high autonomy): engage like a real participant — weigh in on most
-  // substantive lines, and let the planner decide whether it's actually welcome.
-  if (autonomyOf(s) >= 67 && text.trim().split(/\s+/).length >= 3) return true;
+  // Goose's job is to catch mistakes and participate, so once it's balanced-or-higher,
+  // or it's holding a standing instruction to watch for something, weigh in on any
+  // substantive line and let the planner decide whether it's actually welcome.
+  const substantive = text.trim().split(/\s+/).length >= 3;
+  if (substantive && (autonomyOf(s) >= 34 || s.memory.length > 0)) return true;
   return (
     isAddressed(s, text) ||
     text.includes("?") ||
@@ -595,6 +665,16 @@ async function runBrain(s: Session): Promise<void> {
   // Only consult the LLM when a line actually looks actionable.
   if (!worthConsidering(s)) return;
 
+  // Spoken output-mode toggle: "mute / use the chat" ↔ "talk again". Persists.
+  const latest = latestHumanText(s);
+  if (isAddressed(s, latest) || isOneOnOne(s)) {
+    const mode = detectModeCommand(latest);
+    if (mode && s.muted !== (mode === "chat")) {
+      s.muted = mode === "chat";
+      note(s, s.muted ? "Muted — switching to chat-only (still listening)." : "Unmuted — talking out loud again.");
+    }
+  }
+
   s.brainBusy = true;
   s.lastBrainAt = Date.now();
   try {
@@ -602,7 +682,11 @@ async function runBrain(s: Session): Promise<void> {
       oneOnOne: isOneOnOne(s),
       name: nameOf(s),
       autonomy: autonomyOf(s),
+      access: toolAccessOf(s),
+      memory: s.memory,
+      muted: s.muted,
     });
+    rememberFrom(s, decision.remember);
     const record: DecisionRecord = {
       ...decision,
       id: randomUUID(),
@@ -663,6 +747,12 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
   }
 
   if (d.action === "speak" && d.say) {
+    // Chat-only mode (asked to mute): type it instead of speaking.
+    if (s.muted) {
+      note(s, `Muted → chat: "${d.say}"`);
+      const ok = await postToMeetChat(page, d.say);
+      return ok ? "muted; posted to chat" : "muted; chat failed";
+    }
     note(s, `Speaking: "${d.say}"`);
     if (!s.rig) {
       const ok = await postToMeetChat(page, `${nameOf(s)}: ${d.say}`);
@@ -679,8 +769,28 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
   }
 
   if (d.action === "tool" && d.tool?.name) {
-    note(s, `Calling tool: ${d.tool.name}(${d.tool.query ?? ""})`);
-    const result = await runTool(d.tool.name, d.tool.query);
+    const t = d.tool;
+    const access = toolAccessOf(s);
+
+    // Never run a tool silently — say what's happening first (audio + transcript).
+    if (d.say) {
+      note(s, `Announcing: "${d.say}"`);
+      try {
+        if (s.rig && !s.muted) {
+          const u = s.rig.speakText(d.say);
+          gooseLine(s, d.say, u.done);
+          await u.done;
+        } else {
+          await postToMeetChat(page, `${nameOf(s)}: ${d.say}`);
+        }
+      } catch (e) {
+        // e.g. LiveAvatar socket dropped mid-utterance — carry on with the tool.
+        note(s, `announce failed (${(e as Error).message}); running the tool anyway`);
+      }
+    }
+
+    note(s, `Tool: ${t.name}(${t.command ?? t.path ?? t.query ?? ""})`);
+    const result = await executeTool(t, access);
     note(s, `Tool result: ${result}`);
     // Share the tool's answer with the room via chat.
     await postToMeetChat(page, `goose — ${result}`);

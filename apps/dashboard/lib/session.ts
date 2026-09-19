@@ -16,6 +16,7 @@ export interface TranscriptLine {
   t: number; // ms since capture started
   at: string; // ISO wall clock
   text: string;
+  partial?: boolean; // still being spoken
 }
 
 export interface SessionSummary {

@@ -33,7 +33,9 @@ The core product flow, end to end:
 1. Dashboard `/app` — paste a Meet link, "Send the goose" → `POST /api/meet/join`.
 2. `apps/federato-agent/src/meetTranscribe.ts` — launches a local Playwright Chrome
    (`launchMeetChrome`), joins the Meet (`joinMeet` from `meetPresent.ts`), and taps every
-   remote audio stream via Web Audio. ~5s PCM chunks → Gemini `generateContent` → transcript lines.
+   remote audio stream via Web Audio. 16kHz PCM streams continuously over the **Gemini Live API**
+   (WebSocket, `gemini-3.5-transcribe-live`); lines surface ~1-2s after each speaker pauses.
+   Billed by session, so no per-request rate limits.
 3. Lines stream to the dashboard over SSE (`GET /api/meet/sessions/:id/stream`) and render live
    in `components/console/LiveTranscript.tsx` at `/app/meetings/[id]`.
 

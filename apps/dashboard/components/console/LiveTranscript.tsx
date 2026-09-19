@@ -39,9 +39,17 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
     });
     es.addEventListener("line", (e) => {
       const line = JSON.parse((e as MessageEvent).data) as TranscriptLine;
-      setLines((prev) =>
-        prev.some((l) => l.id === line.id) ? prev : [...prev, line],
-      );
+      setLines((prev) => {
+        const i = prev.findIndex((l) => l.id === line.id);
+        if (i === -1) return [...prev, line];
+        const next = prev.slice();
+        next[i] = line; // upsert: partial lines grow in place
+        return next;
+      });
+    });
+    es.addEventListener("note", (e) => {
+      const d = JSON.parse((e as MessageEvent).data) as { msg: string };
+      setNotes((prev) => [...prev.slice(-20), d.msg]);
     });
     es.onerror = () => {
       // The browser auto-reconnects; nothing to do but let it retry.
@@ -50,9 +58,10 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
     return () => es.close();
   }, [sessionId]);
 
+  const lastLen = lines[lines.length - 1]?.text.length ?? 0;
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [lines.length]);
+  }, [lines.length, lastLen]);
 
   const live = status === "listening";
   const working = status === "joining" || status === "waiting-admit";
@@ -99,6 +108,12 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
           }
         />
 
+        {notes.length > 0 && (live || working) && (
+          <p className="tnum border-b border-border px-4 py-1.5 text-[11.5px] text-fg-subtle">
+            {notes[notes.length - 1]}
+          </p>
+        )}
+
         <div className="min-h-0 flex-1 overflow-y-auto">
           {error && (
             <p
@@ -134,7 +149,16 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
               <span className="tnum mt-[2px] shrink-0 text-[11px] text-fg-subtle">
                 {fmtClock(l.t)}
               </span>
-              <p className="text-[13.5px] leading-relaxed text-fg">{l.text}</p>
+              <p className="text-[13.5px] leading-relaxed text-fg">
+                {l.text}
+                {l.partial && (
+                  <span
+                    className="ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[2px] animate-pulse"
+                    style={{ background: "var(--live)" }}
+                    aria-hidden
+                  />
+                )}
+              </p>
             </article>
           ))}
           <div ref={endRef} />

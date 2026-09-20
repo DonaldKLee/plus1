@@ -856,7 +856,6 @@ async function greetOpenAIAfterJoin(s: Session): Promise<void> {
     if (st !== "ready" && st !== "speaking") await s.rig.waitUntilReady(6_000);
   }
   if (!s.openai) return;
-  if (s.status === "ended" || s.status === "error") return;
 
   s.openai.updateInstructions(build(people));
   if (people.length) note(s, `Participants: ${people.join(", ")}`);

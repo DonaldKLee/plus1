@@ -80,7 +80,7 @@ export function Chat() {
       .then((id) => {
         if (!alive) return;
         setChatId(id);
-        const full = `hey, i'm ${name.toLowerCase()}. ask me anything, or tell me to do something — i've got the same tools i use in meetings. if it gets involved, i'll offer to hop on a call.`;
+        const full = `hey, i'm ${name.toLowerCase()}. ask me anything, or tell me to do something. I've got the same tools I use in meetings. If it gets involved, I'll offer to hop on a call.`;
         runTyping(full);
       })
       .catch((e: Error) => alive && setError(e.message));

@@ -42,7 +42,7 @@ export function ArchiveStats() {
     <p className="mb-4 text-[13px] leading-relaxed text-fg-muted">
       <span className="tnum font-medium text-fg">{n(stats.meetings)}</span> meeting{n(stats.meetings) === 1 ? "" : "s"} archived ·{" "}
       <span className="tnum font-medium text-fg">{n(stats.lines).toLocaleString()}</span> lines transcribed,{" "}
-      <span className="tnum font-medium text-fg">{gooseLines.toLocaleString()}</span> of them spoken by the goose ·{" "}
+      <span className="tnum font-medium text-fg">{gooseLines.toLocaleString()}</span> of them spoken by plus1 ·{" "}
       <span className="tnum font-medium text-fg">{fmtHours(n(stats.totalDurationMs))}</span> in rooms
     </p>
   );

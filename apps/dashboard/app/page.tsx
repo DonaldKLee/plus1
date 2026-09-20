@@ -38,7 +38,7 @@ export default function LandingPage() {
         <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.92fr)] lg:gap-16">
           <div className="rise">
             <h1 className="text-[clamp(2.75rem,6.2vw,4.75rem)] font-semibold leading-[0.98] tracking-[-0.045em] text-balance text-fg">
-              Bring more of yourself.
+              Bring a plus one.
             </h1>
 
             <p className="mt-6 max-w-[54ch] text-[clamp(1rem,1.5vw,1.175rem)] leading-relaxed text-fg-muted">
@@ -404,11 +404,7 @@ export default function LandingPage() {
 
           <div className="flex flex-col items-start justify-between gap-3 pt-6 sm:flex-row sm:items-center">
             <p className="flex items-center gap-2 text-[13px] text-fg-muted">
-              Built with
-              <span aria-label="love" style={{ color: "var(--alert)" }}>
-                &hearts;
-              </span>
-              at Hack the North 2026
+              Built with care at Hack the North 2026
             </p>
           </div>
         </div>

@@ -24,7 +24,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fontkit from "@pdf-lib/fontkit";
 import {
+  PDFArray,
   PDFDocument,
+  PDFName,
+  PDFString,
   StandardFonts,
   rgb,
   setCharacterSpacing,
@@ -88,6 +91,26 @@ function readFont(file: string): Buffer | null {
   }
 }
 
+const FONT_FILES = [
+  "Geist-Regular.ttf",
+  "Geist-Medium.ttf",
+  "Geist-SemiBold.ttf",
+  "Geist-Italic.ttf",
+  "GeistMono-Regular.ttf",
+  "GeistMono-Medium.ttf",
+] as const;
+
+/**
+ * Which faces are actually on disk. Checked at startup, not only at render
+ * time: the fallback is a legitimate floor, but an operator should learn that a
+ * deployment shipped without `assets/fonts` from a boot log — not from a reader
+ * receiving a document set in a typeface the design never chose.
+ */
+export function docFontStatus(): { ok: boolean; dir: string; missing: string[] } {
+  const missing = FONT_FILES.filter((f) => !fs.existsSync(path.join(FONT_DIR, f)));
+  return { ok: missing.length === 0, dir: FONT_DIR, missing };
+}
+
 let warned = false;
 
 /**
@@ -108,7 +131,16 @@ export async function loadDocFonts(doc: PDFDocument): Promise<Fonts> {
 
   if (Object.values(files).every((f) => f !== null)) {
     doc.registerFontkit(fontkit);
-    const embed = (b: Buffer) => doc.embedFont(b, { subset: false });
+    // Ligatures off, deliberately. fontkit substitutes Geist's ff/tt/fi
+    // ligatures during shaping, but the width table pdf-lib writes is built
+    // from single-glyph advances, so every ligature opened a visible hole in
+    // the line ("came off ." / "htt ps://"). Turning the feature off is the
+    // only fix that keeps measured wrapping and drawn text in agreement.
+    const embed = (b: Buffer) =>
+      doc.embedFont(b, {
+        subset: false,
+        features: { liga: false, rlig: false, clig: false, dlig: false, calt: false },
+      });
     return {
       sans: await embed(files.sans!),
       medium: await embed(files.medium!),
@@ -206,25 +238,71 @@ type Style = "plain" | "bold" | "italic" | "code";
 interface Tok {
   text: string;
   style: Style;
+  /** Set on the run a reader can click, and on the printed URL beside it. */
+  url?: string;
 }
 
-/** Split inline markdown into styled tokens. Links keep their URL visible. */
+const URL_RE = /\bhttps?:\/\/[^\s<>()]+/;
+
+/**
+ * Split inline markdown into styled tokens.
+ *
+ * The URL stays visible because this is paper first — a link nobody can read is
+ * useless once it is printed — and the run also carries the href so the digital
+ * copy is actually clickable.
+ */
 function inlineTokens(s: string): Tok[] {
-  const src = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, label: string, url: string) =>
-    label.trim().toLowerCase() === url.trim().toLowerCase() ? url : `${label} (${url})`,
-  );
   const out: Tok[] = [];
-  const re = /(\*\*|__)(.+?)\1|(`)([^`]+)`|(?<![*\w])\*(?!\s)([^*]+?)(?<!\s)\*(?!\w)/g;
+  const md = /\[([^\]]+)\]\(([^)\s]+)\)/g;
+
+  // Pass 1: markdown links become a labelled run plus the printed URL.
+  const pieces: Tok[] = [];
   let last = 0;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(src))) {
-    if (m.index > last) out.push({ text: src.slice(last, m.index), style: "plain" });
-    if (m[2] !== undefined) out.push({ text: m[2], style: "bold" });
-    else if (m[4] !== undefined) out.push({ text: m[4], style: "code" });
-    else if (m[5] !== undefined) out.push({ text: m[5], style: "italic" });
-    last = re.lastIndex;
+  while ((m = md.exec(s))) {
+    if (m.index > last) pieces.push({ text: s.slice(last, m.index), style: "plain" });
+    const label = m[1].trim();
+    const url = m[2].trim();
+    if (label.toLowerCase() === url.toLowerCase()) {
+      pieces.push({ text: url, style: "plain", url });
+    } else {
+      pieces.push({ text: label, style: "plain", url });
+      pieces.push({ text: ` (${url})`, style: "plain", url });
+    }
+    last = md.lastIndex;
   }
-  if (last < src.length) out.push({ text: src.slice(last), style: "plain" });
+  if (last < s.length) pieces.push({ text: s.slice(last), style: "plain" });
+
+  // Pass 2: emphasis, code, and bare URLs inside the plain pieces.
+  const re = /(\*\*|__)(.+?)\1|(`)([^`]+)`|(?<![*\w])\*(?!\s)([^*]+?)(?<!\s)\*(?!\w)/g;
+  for (const piece of pieces) {
+    if (piece.url) {
+      out.push(piece);
+      continue;
+    }
+    let cursor = 0;
+    re.lastIndex = 0;
+    let mm: RegExpExecArray | null;
+    const emit = (text: string): void => {
+      // A bare URL in prose is still a link.
+      let rest = text;
+      let hit: RegExpExecArray | null;
+      while ((hit = URL_RE.exec(rest))) {
+        if (hit.index > 0) out.push({ text: rest.slice(0, hit.index), style: "plain" });
+        out.push({ text: hit[0], style: "plain", url: hit[0] });
+        rest = rest.slice(hit.index + hit[0].length);
+      }
+      if (rest) out.push({ text: rest, style: "plain" });
+    };
+    while ((mm = re.exec(piece.text))) {
+      if (mm.index > cursor) emit(piece.text.slice(cursor, mm.index));
+      if (mm[2] !== undefined) out.push({ text: mm[2], style: "bold" });
+      else if (mm[4] !== undefined) out.push({ text: mm[4], style: "code" });
+      else if (mm[5] !== undefined) out.push({ text: mm[5], style: "italic" });
+      cursor = re.lastIndex;
+    }
+    if (cursor < piece.text.length) emit(piece.text.slice(cursor));
+  }
   return out.filter((t) => t.text.length > 0);
 }
 
@@ -233,6 +311,7 @@ interface Part {
   font: PDFFont;
   size: number;
   color: Color;
+  url?: string;
 }
 type Line = Part[];
 
@@ -269,6 +348,7 @@ function layoutRuns(toks: Tok[], f: Fonts, size: number, base: PDFFont, color: C
         w += sw;
         continue;
       }
+      const url = tok.url;
       let ww = widthOf(word, st.font, st.size);
       if (w + ww > maxW && cur.length) {
         // Drop a trailing space before breaking.
@@ -280,16 +360,16 @@ function layoutRuns(toks: Tok[], f: Fonts, size: number, base: PDFFont, color: C
         let chunk = "";
         for (const ch of word) {
           if (widthOf(chunk + ch, st.font, st.size) > maxW) {
-            cur.push({ text: chunk, ...st });
+            cur.push({ text: chunk, ...st, url });
             push();
             chunk = ch;
           } else chunk += ch;
         }
-        cur.push({ text: chunk, ...st });
+        cur.push({ text: chunk, ...st, url });
         w = widthOf(chunk, st.font, st.size);
         continue;
       }
-      cur.push({ text: word, ...st });
+      cur.push({ text: word, ...st, url });
       w += ww;
     }
   }
@@ -316,8 +396,10 @@ function runningHead(c: Ctx): void {
   // Continuation pages carry the document's name, not a second masthead: the
   // reader already knows what this is, they need to know they are still in it.
   c.page.drawRectangle({ x: M, y: PAGE_H - 56, width: FULL_W, height: 2, color: C.brand });
-  const label = c.title.length > 68 ? `${c.title.slice(0, 67)}...` : c.title;
-  draw(c.page, label, { x: M, y: PAGE_H - 74, size: 8.5, font: c.f.mono, color: C.subtle });
+  // Geist, not mono: this is the document's name, and mono here would be a
+  // costume for "technical" rather than a measured value.
+  const label = c.title.length > 74 ? `${c.title.slice(0, 73)}...` : c.title;
+  draw(c.page, label, { x: M, y: PAGE_H - 74, size: 8.5, font: c.f.medium, color: C.subtle, tracking: -0.1 });
   draw(c.page, "plus1", {
     x: PAGE_W - M - widthOf("plus1", c.f.semibold, 8.5, -0.15),
     y: PAGE_H - 74,
@@ -340,15 +422,40 @@ function need(c: Ctx, h: number): void {
   if (c.y - h < BOTTOM) newPage(c);
 }
 
+/**
+ * A real PDF link annotation. The URL is printed on the page either way — this
+ * is paper first — but the copy that gets opened on a laptop should be
+ * clickable, which a flattened string never is.
+ */
+function addLink(c: Ctx, x: number, baseline: number, w: number, size: number, url: string): void {
+  const annot = c.doc.context.obj({
+    Type: "Annot",
+    Subtype: "Link",
+    Rect: [x, baseline - size * 0.25, x + w, baseline + size],
+    Border: [0, 0, 0],
+    F: 4, // print
+    A: { Type: "Action", S: "URI", URI: PDFString.of(url) },
+  });
+  const ref = c.doc.context.register(annot);
+  const existing = c.page.node.lookup(PDFName.of("Annots"), PDFArray);
+  if (existing) existing.push(ref);
+  else c.page.node.set(PDFName.of("Annots"), c.doc.context.obj([ref]));
+}
+
+/** Draw one styled run at a baseline, registering its link when it has one. */
+function drawPart(c: Ctx, p: Part, x: number, baseline: number, tracking = 0): number {
+  draw(c.page, p.text, { x, y: baseline, size: p.size, font: p.font, color: p.color, tracking });
+  const w = widthOf(p.text, p.font, p.size, tracking);
+  if (p.url) addLink(c, x, baseline, w, p.size, p.url);
+  return w;
+}
+
 /** Draw one already-laid-out line and advance. */
 function putLine(c: Ctx, line: Line, x: number, leading: number, align: "left" | "right" = "left", boxW = 0): void {
   const maxSize = line.reduce((a, p) => Math.max(a, p.size), BODY);
   need(c, leading);
   let cx = align === "right" ? x + boxW - lineWidth(line) : x;
-  for (const p of line) {
-    draw(c.page, p.text, { x: cx, y: c.y - maxSize, size: p.size, font: p.font, color: p.color });
-    cx += widthOf(p.text, p.font, p.size);
-  }
+  for (const p of line) cx += drawPart(c, p, cx, c.y - maxSize);
   c.y -= leading;
 }
 
@@ -379,10 +486,7 @@ function paragraph(c: Ctx, text: string, o: BlockOpts = {}): void {
     for (const line of tracked) {
       need(c, leading);
       let cx = M + indent;
-      for (const p of line) {
-        draw(c.page, p.text, { x: cx, y: c.y - size, size: p.size, font: p.font, color: p.color, tracking: o.tracking });
-        cx += widthOf(p.text, p.font, p.size, o.tracking);
-      }
+      for (const p of line) cx += drawPart(c, p, cx, c.y - size, o.tracking);
       c.y -= leading;
     }
   } else {
@@ -490,6 +594,16 @@ function figureBand(c: Ctx, figures: Figure[]): void {
 // ── tables: where the numbers live ────────────────────────────────────────
 const NUMERIC = /^[-+(]?\s*[$€£¥]?\s*\d[\d,\u00A0 ]*(?:\.\d+)?\s*%?\)?$|^[-+]?\d+(?:\.\d+)?\s*(?:%|x|hrs?|h|d|mo|yr|km|kg|pts?)$/i;
 
+/** Inline markers are styling, not content, when deciding what a column holds. */
+const bare = (s: string): string => s.replace(/\*\*|__|`|\*/g, "").trim();
+
+/**
+ * An empty cell, a dash, or "n/a" is the absence of a figure, not a non-figure.
+ * Counting these as text was demoting whole numeric columns to the prose face —
+ * so a bolded total and an em-dash placeholder broke the column they belonged to.
+ */
+const PLACEHOLDER = /^(|-{1,2}|\u2013|\u2014|n\/?a|tbd|\u2022)$/i;
+
 interface Table {
   head: string[];
   rows: string[][];
@@ -545,8 +659,8 @@ function drawTable(c: Ctx, t: Table): void {
   const cols = t.head.length;
   // A column whose body cells are all numbers is a numeric column.
   const numeric = t.head.map((_, i) => {
-    const vals = t.rows.map((r) => r[i]?.trim()).filter((v) => v && v !== "-" && v !== "--");
-    return vals.length > 0 && vals.every((v) => NUMERIC.test(v!));
+    const vals = t.rows.map((r) => bare(r[i] ?? "")).filter((v) => !PLACEHOLDER.test(v));
+    return vals.length > 0 && vals.every((v) => NUMERIC.test(v));
   });
   const align = t.align.map((a, i) => (a === "left" && numeric[i] ? "right" : a));
   const fontFor = (i: number, header: boolean) =>
@@ -555,7 +669,7 @@ function drawTable(c: Ctx, t: Table): void {
   // Intrinsic widths, then scale to the measure.
   const intrinsic = t.head.map((h, i) => {
     const body = t.rows.reduce(
-      (a, r) => Math.max(a, widthOf(r[i] ?? "", fontFor(i, false), CELL)),
+      (a, r) => Math.max(a, widthOf(bare(r[i] ?? ""), fontFor(i, false), CELL)),
       0,
     );
     return Math.max(widthOf(h.toUpperCase(), c.f.monoMedium, 8.2, 0.4), body) + CELL_PAD * 2;
@@ -634,18 +748,17 @@ function drawTable(c: Ctx, t: Table): void {
             : align[i] === "center"
               ? xs[i] + CELL_PAD + Math.max(0, (boxW - lw) / 2)
               : xs[i] + CELL_PAD;
-        for (const p of line) {
-          draw(c.page, p.text, { x: cx, y: cy - CELL, size: p.size, font: p.font, color: p.color });
-          cx += widthOf(p.text, p.font, p.size);
-        }
+        for (const p of line) cx += drawPart(c, p, cx, cy - CELL);
         cy -= CELL * 1.5;
       }
     });
     c.y = top - rowH;
+    // One hairline weight in this document: 1pt. A 0.6pt row rule was a third
+    // treatment nobody chose.
     c.page.drawLine({
       start: { x: M, y: c.y + 3 },
       end: { x: M + FULL_W, y: c.y + 3 },
-      thickness: 0.6,
+      thickness: 1,
       color: C.border,
     });
   }
@@ -862,18 +975,24 @@ function renderBody(c: Ctx, body: string): void {
   let prev: Block["kind"] | undefined;
   const isList = (k?: Block["kind"]) => k === "ul" || k === "ul2" || k === "ol" || k === "task";
 
-  for (const block of blocks) {
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const block = blocks[bi];
+    const next = blocks[bi + 1];
     // Space between blocks: list items sit tight together, prose breathes.
     if (prev) {
       if (isList(prev) && isList(block.kind)) c.y -= 2.5;
-      else if (block.kind !== "h" && block.kind !== "rule") c.y -= 8;
+      else if (block.kind !== "h" && block.kind !== "rule" && prev !== "rule") c.y -= 8;
     }
 
     switch (block.kind) {
       case "h": {
         const size = H_SIZES[block.level];
-        // Keep a heading with the two lines that follow it.
-        need(c, size * 2.4 + BODY * LEAD * 2);
+        // Keep a heading with what follows it: two lines of anything, or three
+        // rows when it opens a spec group, so a group never splits 1/2 across
+        // a page break with its heading stranded above the fold.
+        const follow =
+          next?.kind === "def" || next?.kind === "lead" ? BODY * LEAD * 3 : BODY * LEAD * 2;
+        need(c, size * 2.4 + follow);
         c.y -= block.level === 1 ? 15 : 12;
         paragraph(c, block.text, {
           size,
@@ -891,9 +1010,9 @@ function renderBody(c: Ctx, body: string): void {
       }
 
       case "rule":
-        c.y -= 10;
+        c.y -= 9;
         rule(c);
-        c.y -= 16;
+        c.y -= 15;
         break;
 
       case "quote": {
@@ -955,23 +1074,26 @@ function renderBody(c: Ctx, body: string): void {
       case "def": {
         // A spec row: the label holds its weight, the value runs beside it and
         // wraps under itself rather than under the label.
-        need(c, BODY * LEAD);
+        //
+        // Widow control: a group of spec rows breaks as a group. Reserving the
+        // next row's height too is what keeps one lonely row from opening the
+        // following page.
+        need(c, next?.kind === "def" ? BODY * LEAD * 2 + 8 : BODY * LEAD);
         const lw = widthOf(block.label, c.f.semibold, BODY) + 10;
         draw(c.page, block.label, { x: M, y: c.y - BODY, size: BODY, font: c.f.semibold, color: C.ink });
         const value = layoutRuns(inlineTokens(block.value), c.f, BODY, c.f.sans, C.muted, PROSE_W - lw);
         for (const line of value) {
           need(c, BODY * LEAD);
           let cx = M + lw;
-          for (const p of line) {
-            draw(c.page, p.text, { x: cx, y: c.y - BODY, size: p.size, font: p.font, color: p.color });
-            cx += widthOf(p.text, p.font, p.size);
-          }
+          for (const p of line) cx += drawPart(c, p, cx, c.y - BODY);
           c.y -= BODY * LEAD;
         }
         break;
       }
 
       case "lead":
+        // A lead-in belongs to what follows it, never to the bottom of a page.
+        need(c, BODY * LEAD * 2 + 8);
         c.y -= 3;
         paragraph(c, block.text, { font: c.f.semibold });
         break;

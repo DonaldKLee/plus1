@@ -175,7 +175,7 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
       name: "doc_pdf",
       doc: `doc_pdf — turn text into a real PDF someone can download, open from a link, or be emailed (meeting notes, a recap, action items, a summary, a one-pager, a comparison). Call it whenever someone asks for "notes", "a writeup", "a summary", "a doc", or "a PDF". You WRITE the content yourself from the meeting — don't ask them to dictate it.
 
-COVER WHAT WAS ASKED FOR. Re-read the request and put every single thing it named in the document. If they asked for pricing, the prices are in it. If they asked for next steps, the owners and dates are in it. Never write "TBD", "[insert]", "to be confirmed" or a placeholder — use the real value from the conversation, or leave that line out.
+COVER WHAT WAS ASKED FOR. Re-read the request and put every single thing it named in the document. If they asked for pricing, the prices are in it. If they asked for next steps, the owners and dates are in it. Never invent a value and never write a bare "[insert]" placeholder. If something they asked for genuinely never came up, still give it a line and say so plainly — "not discussed on this call", or "Marcus to confirm the deductible" — because a silently missing figure reads as an answer, and this is the exact failure that makes these documents useless.
 
 CARRY THE NUMBERS. Every figure, price, date, percentage, deadline, limit, deductible, count and name that came up goes in verbatim — do not round, do not summarize a number away, do not describe a number in words. Two or more comparable figures belong in a markdown table, never in a sentence.
 

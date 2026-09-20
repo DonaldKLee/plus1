@@ -30,6 +30,7 @@ import {
 import { createChat, getChat, sendChatMessage, updateChatConfig } from "./chat.js";
 import { getQuotePdf } from "./intactPdf.js";
 import { loadDoc } from "./docPdf.js";
+import { docFontStatus } from "./docTemplate.js";
 import { emailStatus, verifyEmail } from "./email.js";
 import { startPublicDocs } from "./publicDocs.js";
 import {
@@ -416,6 +417,15 @@ app.post("/api/meet/sessions/:id/leave", async (req, res) => {
 const port = Number(process.env.PORT ?? 8787);
 app.listen(port, () => {
   console.log(`backend listening on http://localhost:${port}`);
+  // Say it at boot, not at render time: generated PDFs silently fall back to the
+  // PDF core fonts when Geist is missing, and that is an operator's problem to
+  // know about rather than a reader's to discover.
+  const fonts = docFontStatus();
+  if (!fonts.ok) {
+    console.warn(
+      `[docPdf] Geist missing from ${fonts.dir} (${fonts.missing.join(", ")}) — PDFs will render in the PDF core fonts`,
+    );
+  }
   // The public document server is a separate app on a separate port, so only it
   // ever sits behind the tunnel. Off unless PUBLIC_DOCS=1.
   startPublicDocs({ mainPort: port });

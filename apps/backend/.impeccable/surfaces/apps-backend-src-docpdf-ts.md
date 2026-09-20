@@ -38,9 +38,10 @@ sentences) and the consultancy report cover page. There is no cover, no table of
 section numbering. Page one starts with the answer.
 
 OWN-WORLD: the console's world on paper. White ground, near-black ink (#09090b), one hairline
-weight (#e8e8ea) doing all the separating, no fills except a #fafafa figure band and a #f4f4f5
-table header. Amber (#ffb224) appears exactly twice per page — a 3pt masthead rule and the beak
-of the wordmark — and never as text; amber-as-text is #855000. Geist for prose, Geist Mono for
+weight (#e8e8ea) doing all the separating, no fills except the #fafafa figure band and code
+block; tables carry no fill at all. Amber (#ffb224) appears exactly once per page — the masthead
+rule, 3pt on page one and 2pt over the running head after it — and never as text; amber-as-text
+is #855000, reserved for inline code. Geist for prose, Geist Mono for
 every measured value: figures, dates, IDs, table numerals, page numbers. Display type carries
 real negative tracking (-0.035em to -0.045em) drawn through the PDF text-state operator, not
 faked. Recognizable with every word removed: amber hairline over a white page, a mono column of

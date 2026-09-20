@@ -4,14 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Plus1Mark, cx } from "@/components/ui";
-import { Home, History, Menu, Close, Shield, Sliders, Chat } from "@/components/icons";
+import { Home, History, Menu, Close, Sliders, Chat } from "@/components/icons";
 import { AGENT_URL } from "@/lib/session";
 
 const NAV = [
   { href: "/app", label: "Home", Icon: Home },
   { href: "/app/chat", label: "Chat", Icon: Chat },
   { href: "/app/meetings", label: "Meetings", Icon: History },
-  { href: "/app/underwrite", label: "Underwrite", Icon: Shield },
   { href: "/app/plus1", label: "plus1", Icon: Sliders },
 ];
 

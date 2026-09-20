@@ -170,7 +170,7 @@ export function WorkCamConfig() {
   );
 }
 
-/** Compact mode chip for the Underwrite controls row. */
+/** Compact mode chip for a controls row. */
 export function WorkCamModeToggle({
   mode,
   onChange,

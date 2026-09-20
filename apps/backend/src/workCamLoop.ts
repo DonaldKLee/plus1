@@ -1,10 +1,15 @@
 /**
  * Retry local work-cam until Meet join succeeds.
- *   node --import tsx src/workCamLoop.ts
+ *   node --import tsx src/workCamLoop.ts https://meet.google.com/abc-defg-hij
+ *   MEET_URL=https://meet.google.com/abc-defg-hij node --import tsx src/workCamLoop.ts
  */
 import { startWorkCam, stopWorkCam } from "./workCamMeet.js";
 
-const MEET = "https://meet.google.com/vhz-nzug-ich";
+const MEET = (process.argv[2] ?? process.env.MEET_URL ?? "").trim();
+if (!MEET) {
+  console.error("Pass a Meet link as the first argument or set MEET_URL.");
+  process.exit(2);
+}
 const TASK =
   'Go to maps.google.com, search "Waterloo, Ontario", switch to Satellite, zoom the campus.';
 const MAX = 8;

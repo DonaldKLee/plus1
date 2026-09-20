@@ -36,7 +36,7 @@ const CAPS: { Icon: (p: { width?: number; height?: number; className?: string })
 export function HomeHero() {
   const router = useRouter();
   const [now, setNow] = useState<Date | null>(null);
-  const [url, setUrl] = useState("https://meet.google.com/vhz-nzug-ich");
+  const [url, setUrl] = useState("");
   const [purpose, setPurpose] = useState("");
   const [task, setTask] = useState("");
   const [more, setMore] = useState(false);

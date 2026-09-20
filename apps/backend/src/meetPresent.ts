@@ -516,9 +516,7 @@ export async function presentLiveViewInMeet(opts: {
   return { joined, presented, notes };
 }
 
-export const DEFAULT_MEET_URL = "https://meet.google.com/vhz-nzug-ich";
-
 export function resolveMeetUrl(override?: string): string | undefined {
-  const raw = override?.trim() || envOptional("MEET_URL") || DEFAULT_MEET_URL;
+  const raw = override?.trim() || envOptional("MEET_URL");
   return raw && raw.length > 0 ? raw : undefined;
 }

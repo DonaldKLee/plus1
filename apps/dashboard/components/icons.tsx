@@ -71,6 +71,9 @@ export const Arrow = (p: P) => (
 export const Home = (p: P) => (
   <svg {...base(p)}><path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1v-8.5Z" /></svg>
 );
+export const Car = (p: P) => (
+  <svg {...base(p)}><path d="M4 12.5 5.7 7.8A2 2 0 0 1 7.6 6.5h8.8a2 2 0 0 1 1.9 1.3L20 12.5V17h-2.4v-1.6H6.4V17H4v-4.5Z" /><path d="M4 12.5h16" /><circle cx="8" cy="15" r="1.3" /><circle cx="16" cy="15" r="1.3" /></svg>
+);
 export const History = (p: P) => (
   <svg {...base(p)}><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4.5V9H8" /><path d="M12 7.5V12l3 1.8" /></svg>
 );

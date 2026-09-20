@@ -9,7 +9,7 @@ export default function MeetingsPage() {
     <>
       <PageHeader
         title="Meetings"
-        description="Every room the goose has sat in. Transcripts are saved to MongoDB — open one to read it back, or search across all of them."
+        description="Every room the plus1 has sat in. Transcripts are saved to MongoDB — open one to read it back, or search across all of them."
       />
       <PageBody>
         <ArchiveStats />

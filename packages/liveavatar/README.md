@@ -1,6 +1,6 @@
 # @plus1/liveavatar
 
-HeyGen **LiveAvatar** integration for plus1. The avatar *is* the goose on camera: LiveAvatar
+HeyGen **LiveAvatar** integration for plus1. The avatar *is* the plus1 on camera: LiveAvatar
 renders lipsynced video from audio we push, and this package turns that stream into the
 runner's fake camera and mic inside Google Meet.
 
@@ -56,7 +56,7 @@ POST /api/meet/sessions/:id/emote     {emote}        thinking|typing|nod|honk|id
 GET  /api/meet/sessions/:id/avatar                   {session, media, speaking}
 ```
 
-and streams `avatar` events plus goose `line`s (with `speaker`) over the session SSE. The live
+and streams `avatar` events plus plus1 `line`s (with `speaker`) over the session SSE. The live
 meeting page in the dashboard has the controls. Minimal standalone use:
 
 ```ts
@@ -121,17 +121,17 @@ Verified live on 2026-09-19 (sandbox): session ready in ~1.8 s; avatar starts sp
 after the first PCM chunk; interrupt is immediate; the in-page bridge receives video frames and audio
 (peak RMS 0.22 on the mic bus) in headless Chrome.
 
-The preview page is HLD §12 step 6 ("build the goose page standalone first"): the exact bundle
+The preview page is HLD §12 step 6 ("build the plus1 page standalone first"): the exact bundle
 that goes into the Meet tab, visible, with buttons for speak / interrupt / honk / poses and an
 audio meter. Iterate there; then it just works in Meet.
 
 Sandbox mode (`is_sandbox: true`) costs nothing, forces the Wayne avatar and ends after ~1 min.
 Set `LIVEAVATAR_SANDBOX=0` and `LIVEAVATAR_AVATAR_ID` for production.
 
-## The goose
+## The plus1
 
 LiveAvatar renders human-style avatars. Custom avatars can be created from a **single image**
-(no voice attached, which is fine: we bring our own). A goose-in-a-suit image avatar is the
+(no voice attached, which is fine: we bring our own). A plus1-in-a-suit image avatar is the
 intended path; `avatarId` is just a config value here.
 
 ## Gotchas we already handled
@@ -148,7 +148,7 @@ intended path; `avatarId` is just a config value here.
   SDK. We trust HTTP status and validate `data`, not `code`.
 - **Init scripts run in every frame.** The early script only installs in the top frame.
 - **A large init script stalls Meet's document load** (`readyState` stuck at `loading`). Hence the 2 KiB early bundle + late injection.
-- **The room audio tap must skip the goose's own playback.** The bridge marks its media elements `data-plus1-avatar`; the tap in `meetTranscribe.ts` skips them, otherwise the goose transcribes itself.
+- **The room audio tap must skip the plus1's own playback.** The bridge marks its media elements `data-plus1-avatar`; the tap in `meetTranscribe.ts` skips them, otherwise the plus1 transcribes itself.
 - **`getUserMedia` can be called more than once** (device switches). Each call gets fresh tracks
   from the same canvas and mixer; `enumerateDevices` advertises one camera and one mic.
 - **AudioContext autoplay policy.** Chromium needs `--autoplay-policy=no-user-gesture-required`;

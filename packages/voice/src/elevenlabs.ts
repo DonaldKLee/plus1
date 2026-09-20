@@ -27,7 +27,7 @@ export interface VoiceSettings {
 
 export interface ElevenLabsTtsOptions {
   apiKey: string;
-  /** Default: Daniel, a steady British broadcaster: the goose's "slightly-too-formal middle manager". */
+  /** Default: Daniel, a steady British broadcaster: the plus1's "slightly-too-formal middle manager". */
   voiceId?: string;
   model?: ElevenLabsModel;
   voiceSettings?: VoiceSettings;
@@ -42,7 +42,7 @@ export interface ElevenLabsTtsOptions {
 }
 
 export const DEFAULT_VOICE_ID = "onwK4e9ZLuTAKqWW03F9"; // Daniel
-export const GOOSE_VOICE_SETTINGS: VoiceSettings = { stability: 0.55, similarity_boost: 0.8, style: 0.15, use_speaker_boost: true, speed: 1.04 };
+export const plus1_VOICE_SETTINGS: VoiceSettings = { stability: 0.55, similarity_boost: 0.8, style: 0.15, use_speaker_boost: true, speed: 1.04 };
 
 export interface ElevenLabsVoice {
   voice_id: string;
@@ -92,7 +92,7 @@ export class ElevenLabsTts implements TextToSpeech {
         body: JSON.stringify({
           text: clean,
           model_id: this.model,
-          voice_settings: { ...GOOSE_VOICE_SETTINGS, ...this.opts.voiceSettings },
+          voice_settings: { ...plus1_VOICE_SETTINGS, ...this.opts.voiceSettings },
           ...(this.opts.languageCode ? { language_code: this.opts.languageCode } : {}),
         }),
         signal: ctl.signal,
@@ -160,7 +160,7 @@ export class ElevenLabsTts implements TextToSpeech {
   }
 }
 
-/** Collapse whitespace; drop markdown-ish noise the planner might leak; keep the lowercase goose voice as written. */
+/** Collapse whitespace; drop markdown-ish noise the planner might leak; keep the lowercase plus1 voice as written. */
 export function normalizeText(text: string): string {
   return text
     .replace(/```[\s\S]*?```/g, " ")

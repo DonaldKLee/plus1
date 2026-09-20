@@ -160,6 +160,12 @@ export function JoinMeeting() {
             blank and the first thing said becomes the label.
           </p>
         )}
+
+        <p className="mt-3 text-[12.5px] leading-snug text-fg-subtle">
+          The goose joins as a visible guest in a local Chrome window, then
+          transcribes the room with Gemini. Lines stream in below as people
+          speak.
+        </p>
       </form>
     </section>
   );

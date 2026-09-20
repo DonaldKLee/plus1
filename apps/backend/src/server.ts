@@ -1,8 +1,11 @@
+import "./plus1Config.js"; // load committed plus1 config + hydrate env before anything reads it
 import express from "express";
 import cors from "cors";
 import { envOptional } from "./env.js";
 import { cacheSchemaAndPolicies } from "./federatoClient.js";
 import { rankQueue } from "./rank.js";
+import { agenticQuery } from "./federatoQuery.js";
+import { runFederatoTool } from "./federatoTools.js";
 import { deepDivePolicy } from "./deepDive.js";
 import {
   openWorkSessionForScreenshare,
@@ -25,11 +28,12 @@ import {
   updateSessionConfig,
 } from "./meetTranscribe.js";
 import { createChat, getChat, sendChatMessage, updateChatConfig } from "./chat.js";
+import { getQuotePdf } from "./intactPdf.js";
 import {
   deleteMeeting,
-  getGooseSettings,
+  getplus1Settings,
   meetingStats,
-  saveGooseSettings,
+  saveplus1Settings,
   searchMeetings,
   storeEnabled,
 } from "./store.js";
@@ -76,8 +80,44 @@ app.post("/api/federato/cache", async (_req, res) => {
 app.get("/api/federato/rank", async (req, res) => {
   try {
     const refresh = req.query.refresh === "1" || req.query.refresh === "true";
-    const result = await rankQueue({ refresh });
+    const enrich = req.query.enrich === "1" || req.query.enrich === "true";
+    const result = await rankQueue({ refresh, enrich });
     res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// ── The agent's Federato tools, callable directly (the UW tab, curl, judges) ──
+app.post("/api/federato/query", async (req, res) => {
+  try {
+    const goal = typeof req.body?.goal === "string" ? req.body.goal.trim() : "";
+    if (!goal) { res.status(400).json({ error: "body.goal (plain english) required" }); return; }
+    res.json(await agenticQuery(goal));
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+app.get("/api/federato/enrich/:policyId", async (req, res) => {
+  try {
+    const out = await runFederatoTool("federato_enrich", { query: String(req.params.policyId) });
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+app.get("/api/federato/portfolio", async (req, res) => {
+  try {
+    res.json(await runFederatoTool("federato_portfolio", { query: typeof req.query.by === "string" ? req.query.by : undefined }));
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+app.post("/api/federato/tool", async (req, res) => {
+  try {
+    const name = typeof req.body?.name === "string" ? req.body.name : "";
+    if (!name.startsWith("federato_")) { res.status(400).json({ error: "body.name must be a federato_* tool" }); return; }
+    res.json(await runFederatoTool(name, { query: typeof req.body?.query === "string" ? req.body.query : undefined }));
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -86,7 +126,8 @@ app.get("/api/federato/rank", async (req, res) => {
 app.get("/api/federato/deep-dive/:policyId?", async (req, res) => {
   try {
     const policyId = Number(req.params.policyId ?? 1001);
-    const { deepDive, hops } = await deepDivePolicy(policyId);
+    const enrich = req.query.enrich !== "0";
+    const { deepDive, hops } = await deepDivePolicy(policyId, { enrich });
     const browse =
       req.query.browse === "0"
         ? null
@@ -151,7 +192,7 @@ app.post("/api/federato/present-meet", async (req, res) => {
   }
 });
 
-// ── Send a goose: join a Meet and transcribe it live ──────────────────────
+// ── Send a plus1: join a Meet and transcribe it live ──────────────────────
 const MEET_RE = /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\?.*)?$/i;
 
 app.post("/api/meet/join", (req, res) => {
@@ -236,8 +277,8 @@ app.get("/api/meet/sessions/:id/stream", (req, res) => {
   }
 });
 
-// ── The goose speaks: control-plane → runner commands (HLD §10), per session ──
-function gooseRoute(handler: (id: string, body: any) => unknown | Promise<unknown>) {
+// ── The plus1 speaks: control-plane → runner commands (HLD §10), per session ──
+function plus1Route(handler: (id: string, body: any) => unknown | Promise<unknown>) {
   return async (req: express.Request, res: express.Response) => {
     try {
       const out = await handler(String(req.params.id), req.body ?? {});
@@ -248,38 +289,38 @@ function gooseRoute(handler: (id: string, body: any) => unknown | Promise<unknow
     }
   };
 }
-app.post("/api/meet/sessions/:id/speak", gooseRoute((id, b) => {
+app.post("/api/meet/sessions/:id/speak", plus1Route((id, b) => {
   if (typeof b.text !== "string" || !b.text.trim()) throw new Error("text required");
   return speakInSession(id, b.text);
 }));
-app.post("/api/meet/sessions/:id/filler", gooseRoute((id, b) => fillerInSession(id, b.kind ?? "ack") ?? { error: "no fillers cached" }));
-app.post("/api/meet/sessions/:id/interrupt", gooseRoute((id) => { interruptSession(id); }));
-app.post("/api/meet/sessions/:id/honk", gooseRoute((id) => honkSession(id)));
-app.post("/api/meet/sessions/:id/emote", gooseRoute((id, b) => emoteSession(id, b.emote ?? "idle")));
-app.post("/api/meet/sessions/:id/config", gooseRoute((id, b) => {
+app.post("/api/meet/sessions/:id/filler", plus1Route((id, b) => fillerInSession(id, b.kind ?? "ack") ?? { error: "no fillers cached" }));
+app.post("/api/meet/sessions/:id/interrupt", plus1Route((id) => { interruptSession(id); }));
+app.post("/api/meet/sessions/:id/honk", plus1Route((id) => honkSession(id)));
+app.post("/api/meet/sessions/:id/emote", plus1Route((id, b) => emoteSession(id, b.emote ?? "idle")));
+app.post("/api/meet/sessions/:id/config", plus1Route((id, b) => {
   const config = b?.config && typeof b.config === "object" ? b.config : b;
   const ok = updateSessionConfig(id, config ?? {});
   if (!ok) throw new Error("No such session");
   return { ok: true };
 }));
 
-// ── Goose settings, stored in MongoDB so they follow the goose ─────────────
-app.get("/api/goose/config", async (_req, res) => {
+// ── plus1 settings, stored in MongoDB so they follow the plus1 ─────────────
+app.get("/api/plus1/config", async (_req, res) => {
   try {
-    res.json({ config: await getGooseSettings(), store: storeEnabled() ? "mongodb" : "memory" });
+    res.json({ config: await getplus1Settings(), store: storeEnabled() ? "mongodb" : "memory" });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
 });
 
-app.put("/api/goose/config", async (req, res) => {
+app.put("/api/plus1/config", async (req, res) => {
   const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : req.body;
   if (!config || typeof config !== "object") {
     res.status(400).json({ error: "Expected a config object" });
     return;
   }
   try {
-    const saved = await saveGooseSettings(config as Record<string, unknown>);
+    const saved = await saveplus1Settings(config as Record<string, unknown>);
     // No database configured is not an error: the tab keeps its local copy.
     res.json({ ok: true, saved, store: storeEnabled() ? "mongodb" : "memory" });
   } catch (e) {
@@ -287,7 +328,19 @@ app.put("/api/goose/config", async (req, res) => {
   }
 });
 
-// ── Live chat with the goose (no meeting) ───────────────────────────────────
+// ── Live chat with the plus1 (no meeting) ───────────────────────────────────
+// Serve a generated Intact quote PDF (in-memory, short-lived).
+app.get("/api/intact/quote/:id.pdf", (req, res) => {
+  const bytes = getQuotePdf(String(req.params.id));
+  if (!bytes) {
+    res.status(404).json({ error: "quote expired or not found" });
+    return;
+  }
+  res.setHeader("content-type", "application/pdf");
+  res.setHeader("content-disposition", `inline; filename="intact-quote-${req.params.id}.pdf"`);
+  res.send(Buffer.from(bytes));
+});
+
 app.post("/api/chat/sessions", (req, res) => {
   const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : undefined;
   res.json(createChat(config));

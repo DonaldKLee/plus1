@@ -447,7 +447,7 @@ export function WorldMap() {
           </span>
         </span>
         <span className="text-[13px] text-fg-muted">
-          meetings a goose has sat in on
+          meetings a plus1 has sat in on
         </span>
         <span className="ml-auto text-[12px] text-fg-subtle">
           Drag to spin · illustrative data

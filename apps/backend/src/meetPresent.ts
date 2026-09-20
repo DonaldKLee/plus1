@@ -29,7 +29,7 @@ function chromePath(): string | undefined {
   );
 }
 
-/** Chrome profile the goose/presenter joins with. MEET_PROFILE_DIR (relative to repo root) overrides. */
+/** Chrome profile the plus1/presenter joins with. MEET_PROFILE_DIR (relative to repo root) overrides. */
 export function screenshareProfileDir(): string {
   const override = envOptional("MEET_PROFILE_DIR");
   return override ? path.resolve(ROOT, override) : path.join(CACHE_DIR, "screenshare-profile");
@@ -215,7 +215,7 @@ async function dumpMeetDebug(page: Page, notes: string[]): Promise<void> {
 }
 
 export interface JoinOptions {
-  /** Join muted (presenter) or unmuted (the goose). Default muted. */
+  /** Join muted (presenter) or unmuted (the plus1). Default muted. */
   muted?: boolean;
   /** "on": camera stays on — it's the avatar. Default "off". */
   camera?: "on" | "off";
@@ -238,7 +238,7 @@ export async function joinMeet(page: Page, notes: string[], opts: JoinOptions = 
     notes.push("Signed-in Meet prejoin (no guest name field).");
   }
 
-  // Camera always off. Mic off only if requested — the goose joins unmuted so
+  // Camera always off. Mic off only if requested — the plus1 joins unmuted so
   // it can speak (its BlackHole mic is silent until it plays a reply).
   const mods = process.platform === "darwin" ? "Meta" : "Control";
   if (muted) {
@@ -247,10 +247,10 @@ export async function joinMeet(page: Page, notes: string[], opts: JoinOptions = 
     }
     notes.push("Joined muted.");
   } else {
-    notes.push("Joining unmuted so the goose can speak.");
+    notes.push("Joining unmuted so the plus1 can speak.");
   }
   if (opts.camera === "on") {
-    // The goose: the camera is the avatar. Only click "Turn on camera" if Meet shows it.
+    // The plus1: the camera is the avatar. Only click "Turn on camera" if Meet shows it.
     if (await clickNamed(page, /turn on camera/i, 1000)) notes.push("Camera was off; turned on.");
     if (!muted && (await clickNamed(page, /turn on (microphone|mic)/i, 1000))) notes.push("Mic was off; turned on.");
   } else if (!(await clickNamed(page, /turn off camera/i, 1200))) {

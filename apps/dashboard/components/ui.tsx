@@ -7,7 +7,7 @@ export function cx(...parts: (string | false | null | undefined)[]) {
 /* ---------------------------------------------------------------- brand ---- */
 
 /**
- * The plus1 mark: a Canada goose head in profile, beak in brand amber, with a
+ * The plus1 mark: a Canada plus1 head in profile, beak in brand amber, with a
  * suit collar at the neck. Two-tone so it survives on either theme.
  */
 export function GooseMark({
@@ -31,6 +31,9 @@ export function GooseMark({
     />
   );
 }
+
+/** Alias kept for compatibility with main-branch imports */
+export const Plus1Mark = GooseMark;
 
 export function Wordmark({ className, markSize = 22 }: { className?: string; markSize?: number }) {
   return (

@@ -3,7 +3,7 @@
  *
  * The in-memory Map in meetTranscribe.ts is still the source of truth while a
  * session is live; this module mirrors it into Atlas so transcripts, the
- * goose's decisions, and the operator notes survive a backend restart and the
+ * plus1's decisions, and the operator notes survive a backend restart and the
  * dashboard has real history instead of an empty list.
  *
  * Everything here degrades to a no-op when MONGODB_URI is unset, so the repo
@@ -40,7 +40,7 @@ export interface MeetingDoc {
   _id: string; // the session id
   meetUrl: string;
   meetCode: string;
-  /** What the meeting is for, typed by the operator when sending the goose. */
+  /** What the meeting is for, typed by the operator when sending the plus1. */
   purpose?: string;
   status: string;
   createdAt: string;
@@ -51,6 +51,15 @@ export interface MeetingDoc {
   notes: string[];
   lines: StoredLine[];
   decisions: StoredDecision[];
+  /** Standing instructions and facts the agent was told to hold onto. */
+  memory?: string[];
+  /** Slot-filling state: active task, collected params, what's still missing. */
+  state?: {
+    activeTask: string;
+    collected: Record<string, string>;
+    missing: string[];
+    completed: string[];
+  };
   lineCount: number;
   /** First substantive thing said — the label for meetings with no purpose. */
   preview?: string;
@@ -60,8 +69,8 @@ export interface MeetingDoc {
 
 const COLLECTION = "meetings";
 const SETTINGS = "settings";
-/** Single settings document: there is one goose per deployment. */
-const GOOSE_SETTINGS_ID = "goose";
+/** Single settings document: there is one plus1 per deployment. */
+const plus1_SETTINGS_ID = "plus1";
 
 let client: MongoClient | null = null;
 let dbPromise: Promise<Db> | null = null;
@@ -83,7 +92,7 @@ async function db(): Promise<Db | null> {
   }
   if (!dbPromise) {
     dbPromise = (async () => {
-      client = new MongoClient(uri, { appName: "plus1-goose" });
+      client = new MongoClient(uri, { appName: "plus1-plus1" });
       await client.connect();
       const database = client.db(envOptional("MONGODB_DB") ?? "plus1");
       const meetings = database.collection<MeetingDoc>(COLLECTION);
@@ -301,7 +310,7 @@ export async function searchMeetings(q: string, limit = 25): Promise<MeetingSumm
 export async function meetingStats(): Promise<{
   meetings: number;
   lines: number;
-  gooseLines: number;
+  plus1Lines: number;
   totalDurationMs: number;
 } | null> {
   const col = await meetings();
@@ -320,11 +329,11 @@ export async function meetingStats(): Promise<{
       ])
       .toArray(),
   );
-  const gooseRows = await safe("meetingStats.goose", () =>
+  const plus1Rows = await safe("meetingStats.plus1", () =>
     col
-      .aggregate<{ _id: null; gooseLines: number }>([
+      .aggregate<{ _id: null; plus1Lines: number }>([
         { $project: { agentLines: { $filter: { input: "$lines", as: "l", cond: "$$l.agent" } } } },
-        { $group: { _id: null, gooseLines: { $sum: { $size: "$agentLines" } } } },
+        { $group: { _id: null, plus1Lines: { $sum: { $size: "$agentLines" } } } },
       ])
       .toArray(),
   );
@@ -332,40 +341,40 @@ export async function meetingStats(): Promise<{
   return {
     meetings: r?.meetings ?? 0,
     lines: r?.lines ?? 0,
-    gooseLines: gooseRows?.[0]?.gooseLines ?? 0,
+    plus1Lines: plus1Rows?.[0]?.plus1Lines ?? 0,
     totalDurationMs: r?.totalDurationMs ?? 0,
   };
 }
 
-// ── Goose settings ────────────────────────────────────────────────────────
-// The Goose tab used to keep its config in localStorage, so it lived in one
+// ── plus1 settings ────────────────────────────────────────────────────────
+// The plus1 tab used to keep its config in localStorage, so it lived in one
 // browser and the backend only saw it when a meeting started. Stored here it
-// follows the goose across browsers and restarts, and a session that joins
+// follows the plus1 across browsers and restarts, and a session that joins
 // without an explicit config picks these up.
 
-export interface GooseSettingsDoc {
+export interface plus1SettingsDoc {
   _id: string;
   config: Record<string, unknown>;
   updatedAt: string;
 }
 
-/** The saved goose config, or null when nothing is stored yet. */
-export async function getGooseSettings(): Promise<Record<string, unknown> | null> {
+/** The saved plus1 config, or null when nothing is stored yet. */
+export async function getplus1Settings(): Promise<Record<string, unknown> | null> {
   const database = await db().catch(() => null);
   if (!database) return null;
-  const doc = await safe("getGooseSettings", () =>
-    database.collection<GooseSettingsDoc>(SETTINGS).findOne({ _id: GOOSE_SETTINGS_ID }),
+  const doc = await safe("getplus1Settings", () =>
+    database.collection<plus1SettingsDoc>(SETTINGS).findOne({ _id: plus1_SETTINGS_ID }),
   );
   return doc?.config ?? null;
 }
 
-/** Replace the saved goose config. Returns false when there is no database. */
-export async function saveGooseSettings(config: Record<string, unknown>): Promise<boolean> {
+/** Replace the saved plus1 config. Returns false when there is no database. */
+export async function saveplus1Settings(config: Record<string, unknown>): Promise<boolean> {
   const database = await db().catch(() => null);
   if (!database) return false;
-  const r = await safe("saveGooseSettings", () =>
-    database.collection<GooseSettingsDoc>(SETTINGS).updateOne(
-      { _id: GOOSE_SETTINGS_ID },
+  const r = await safe("saveplus1Settings", () =>
+    database.collection<plus1SettingsDoc>(SETTINGS).updateOne(
+      { _id: plus1_SETTINGS_ID },
       { $set: { config, updatedAt: new Date().toISOString() } },
       { upsert: true },
     ),

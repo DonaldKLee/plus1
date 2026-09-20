@@ -15,7 +15,20 @@ export {
   type BuildingInput,
   type LocationInput,
   type AppetiteResult,
+  type ScoreOptions,
 } from "./appetite.js";
+
+export {
+  scoreEnrichment,
+  scoreDeclarations,
+  scoreNfipClaims,
+  scoreWeatherExtremes,
+  describeEnrichment,
+  type HazardEnrichment,
+} from "./enrichment.js";
+
+export { compactSchema, QUERY_GUIDE, validateQueryPayload, collapseGroups, isAggregation, type QueryValidation } from "./queryGuide.js";
+export { APPETITE_GUIDELINES, GLOSSARY, REQUIRED_DATA_POINTS, explainGuidelines, type GuidelineRow } from "./guidelines.js";
 
 export {
   planAppetiteQueries,

@@ -1,6 +1,6 @@
 # plus1 — High-Level Design
 
-> A 3D goose in a business suit joins your meeting. It listens, answers when you talk to it, and
+> A 3D plus1 in a business suit joins your meeting. It listens, answers when you talk to it, and
 > does the work — drafts the email, reviews the doc you paste in the chat, books the room — while
 > the meeting is still happening.
 
@@ -19,7 +19,7 @@ it something the way you'd ask a coworker, out loud, and it answers out loud.
 The name is the positioning: you're bringing a plus one, not sending a replacement. It's a guest
 with a face and a voice, clearly artificial, doing work alongside you.
 
-**Why a goose in a suit.** A stylized character dodges the uncanny valley entirely, a beak driven
+**Why a plus1 in a suit.** A stylized character dodges the uncanny valley entirely, a beak driven
 by audio amplitude is far simpler than lipsyncing a human face, and nobody in the call is confused
 about whether they're talking to a person. The absurdity is doing real design work.
 
@@ -56,7 +56,7 @@ meetings the user isn't in.
 ## 3. Product surface
 
 ### Setup
-- Goose name, personality (deferential intern ↔ smug consultant), freeform behavior notes
+- plus1 name, personality (deferential intern ↔ smug consultant), freeform behavior notes
 - Guardrails: never commit to deadlines, never discuss comp, never send without asking
 - Voice picker: a few pre-designed voices, preview button plays a honk
 
@@ -100,7 +100,7 @@ The Mind column is the main debugging tool during development. Build it early.
 │ Node+Playwright│ │memory/RAG│ │gate·plan·│ │slack · gmail│
 │ · joins Meet   │ │ persona  │ │  review  │ │gcal · notion│
 │ · fake camera  │ └──────────┘ └──────────┘ └─────────────┘
-│   = 3D goose   │ ┌──────────┐ ┌──────────┐
+│   = 3D plus1   │ ┌──────────┐ ┌──────────┐
 │ · fake mic     │ │ELEVENLABS│ │BROWSERBASE│
 │ · reads caps   │ │  voice   │ │doc review │
 │ · reads chat   │ └──────────┘ └──────────┘
@@ -138,7 +138,7 @@ admission. **Burner account only, never a personal one.**
 
 ### 5.2 Fake camera and mic
 
-Override `getUserMedia` before Meet's JS loads. The goose renders into the canvas that *is* the
+Override `getUserMedia` before Meet's JS loads. The plus1 renders into the canvas that *is* the
 camera.
 
 ```js
@@ -148,7 +148,7 @@ navigator.mediaDevices.getUserMedia = async (constraints) => {
   if (constraints.video) {
     const canvas = document.createElement('canvas');
     canvas.width = 1280; canvas.height = 720;
-    window.__gooseCanvas = canvas;          // three.js renders here
+    window.__plus1Canvas = canvas;          // three.js renders here
     tracks.push(canvas.captureStream(30).getVideoTracks()[0]);
   }
   if (constraints.audio) {
@@ -166,7 +166,7 @@ navigator.mediaDevices.getUserMedia = async (constraints) => {
 `import()` from a CDN fails silently. This is the single most likely thing to cost you an
 unexplained hour.
 
-**Fallback:** OBS browser source pointed at a local goose page → OBS virtual camera. Needs a real
+**Fallback:** OBS browser source pointed at a local plus1 page → OBS virtual camera. Needs a real
 desktop, always works.
 
 ### 5.3 Hearing the room
@@ -188,7 +188,7 @@ Same observer pattern on the chat panel, and it's essential rather than optional
 not survive speech-to-text, ever.
 
 The fix is also good character writing: when asked to look at something with no link in the chat,
-the goose says **"drop the link in the chat and I'll take a look."** Exactly what a person says, and
+the plus1 says **"drop the link in the chat and I'll take a look."** Exactly what a person says, and
 it solves the problem completely.
 
 Chat is therefore an input channel (URLs, `@plus1 do X`, `/honk`) and an output channel (artifact
@@ -258,7 +258,7 @@ CMD Xvfb :99 -screen 0 1280x720x24 & \
     node dist/supervisor.js
 ```
 
-A quirk worth understanding: audio the goose **sends** is generated inside the page (WebAudio →
+A quirk worth understanding: audio the plus1 **sends** is generated inside the page (WebAudio →
 `MediaStreamDestination`) and audio it **receives** is read as caption text from the DOM — so no
 real audio ever crosses the OS audio subsystem. The dummy PulseAudio sink exists only because
 Chrome can be fussy initializing `AudioContext` without one. This is a real simplification over how
@@ -297,7 +297,7 @@ reconnect path — Chrome will die on you eventually.
 
 For development, and for any meeting you're personally in, the VPS is unnecessary: run the
 supervisor on your laptop, expose it with a tunnel, and point the Worker at that. Chrome opens on
-your screen, you watch the goose render live, and you can intervene when Meet does something
+your screen, you watch the plus1 render live, and you can intervene when Meet does something
 unexpected. This is by far the fastest iteration loop — stay here for most of the build.
 
 The VPS earns its place the moment plus1 should join a meeting when your laptop is closed. Worth
@@ -316,11 +316,11 @@ debugging.
 
 ---
 
-## 7. The goose
+## 7. The plus1
 
 ### Model
 Low-poly, stylized, in a suit. Either a CC-licensed rigged bird (attribute it in the README),
-text-to-3D from Meshy or Tripo, or Blender primitives — a goose is genuinely capsules and a cone.
+text-to-3D from Meshy or Tripo, or Blender primitives — a plus1 is genuinely capsules and a cone.
 The suit is separate geometry and doesn't need to deform.
 
 ### Rig — four channels, that's all
@@ -332,11 +332,11 @@ The suit is separate geometry and doesn't need to deform.
 | **Emotes** | `agent.emote` commands | `thinking`, `honk`, `nod`, `typing` |
 
 ### Render
-Three.js into `window.__gooseCanvas` at 30fps, 720p: goose, simple backdrop, two lights, no
+Three.js into `window.__plus1Canvas` at 30fps, 720p: plus1, simple backdrop, two lights, no
 shadows. Keep it light enough that rendering never competes with the WebRTC encoder.
 
 ### Voice
-A designed character voice — slightly-too-formal corporate middle manager who is also a goose —
+A designed character voice — slightly-too-formal corporate middle manager who is also a plus1 —
 with streaming TTS.
 
 **Pre-cache filler phrases** ("on it", "one sec", "mm, let me check"). Play one the instant the gate
@@ -397,7 +397,7 @@ Input: rolling transcript (~30 turns) + persona block + retrieved evidence + ava
 ```
 
 Put ~10 few-shot examples of real conversational speech in the prompt. Response style is a feature,
-not a detail — a goose that talks like a chatbot is a failed goose.
+not a detail — a plus1 that talks like a chatbot is a failed plus1.
 
 ### 8.4 Document review
 
@@ -444,7 +444,7 @@ the browser. **Auto** executes and announces after; **Ask** announces and waits 
 ## 9. Data model (D1)
 
 ```sql
-personas(id, user_id, goose_name, voice_id, style_prompt, guardrails_json, created_at)
+personas(id, user_id, plus1_name, voice_id, style_prompt, guardrails_json, created_at)
 integrations(id, user_id, kind, mcp_url, auth_json, tool_policy_json, status)
 sessions(id, user_id, persona_id, meet_url, mode, state, started_at, ended_at)
 utterances(id, session_id, ts, speaker, text, source, intent, confidence, is_agent)
@@ -454,7 +454,7 @@ decisions(id, session_id, utterance_id, plan_json, sources_json,
 actions(id, session_id, tool, args_json, status, result_json,
         artifact_url, approved_by, created_at)
 
--- R2: goose model + textures, TTS audio cache, screenshots
+-- R2: plus1 model + textures, TTS audio cache, screenshots
 -- Backboard: persona memory + the RAG corpus
 ```
 
@@ -503,7 +503,7 @@ plus1/
 │  └─ queue-consumer/ # async action execution
 ├─ packages/
 │  ├─ brain/          # gate, planner, conflict resolver — pure, testable, no network
-│  ├─ goose/          # three.js scene, rig, emotes, beak driver
+│  ├─ plus1/          # three.js scene, rig, emotes, beak driver
 │  ├─ mcp-client/     # JSON-RPC client, tool registry, policy enforcement
 │  ├─ voice/          # TTS streaming + cached fillers
 │  └─ protocol/       # shared zod schemas for §8 and §10
@@ -523,7 +523,7 @@ Each step is independently testable, which is what keeps the codebase coherent a
 3. **`workers/session-do`** — Durable Object, state machine from §8.1, WS fan-out.
 4. **`apps/runner`** — Playwright join, fake media, caption + chat scraping. §5.2–5.4 are the parts most likely to be wrong when written from scratch.
 5. **`packages/voice`** — streaming TTS + cached fillers.
-6. **`packages/goose`** — build as a standalone HTML page first, *then* inline into the runner. Far faster iteration.
+6. **`packages/plus1`** — build as a standalone HTML page first, *then* inline into the runner. Far faster iteration.
 7. **`apps/dashboard`** — three-column console, fake data first, live data second.
 8. **`packages/mcp-client`** — JSON-RPC client, registry, Auto/Ask/Off policy.
 9. **`packages/brain/conflict.ts`** — write the test cases from the messy corpus before the code.
@@ -547,7 +547,7 @@ That one constraint is what keeps things coherent through a lot of fast generati
 | Google flags the account | Burner accounts only, keep a spare |
 | `getUserMedia` override fails | OBS virtual camera fallback, tested in advance |
 | Private doc won't open in the cloud browser | Log that context in, or use a public URL |
-| Spoken URLs are garbage | Route through the meeting chat; have the goose ask for a link |
+| Spoken URLs are garbage | Route through the meeting chat; have the plus1 ask for a link |
 | Latency over 3s feels dead | Fast gate model, streaming TTS, pre-cached fillers |
 | 3D render starves the encoder | Low-poly, 30fps, 720p, two lights, no shadows |
 | Model licensing | CC-BY only, attribute with a link in the README |

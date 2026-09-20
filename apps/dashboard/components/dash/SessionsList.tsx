@@ -124,7 +124,7 @@ export function SessionsList({
       <div className="rounded-[var(--r)] border border-border">
         <Empty
           title="Agent not reachable"
-          body="Start the backend (npm run backend) so the goose can join meetings."
+          body="Start the backend (npm run backend) so the plus1 can join meetings."
         />
       </div>
     );
@@ -146,7 +146,7 @@ export function SessionsList({
           ) : (
             <Empty
               title="No meetings yet"
-              body="Paste a Google Meet link above and send the goose in. Transcripts are saved and show up here."
+              body="Paste a Google Meet link above and send the plus1 in. Transcripts are saved and show up here."
             />
           )}
         </div>

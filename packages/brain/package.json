@@ -17,13 +17,14 @@
     }
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test src/federato/*.test.ts",
+    "test": "node --import tsx --test src/federato/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@plus1/protocol": "*"
   },
   "devDependencies": {
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "tsx": "^4.19.2"
   }
 }

@@ -33,17 +33,17 @@ export function ArchiveStats() {
 
   if (!stats || stats.meetings === 0) return null;
 
-  // A sentence, not a metric wall: these are context for the list below,
-  // never the point of the page.
-  const n = (v: number) => <span className="tnum font-medium text-fg">{v.toLocaleString()}</span>;
+  // Defensive: tolerate an older/newer backend that omits a field or still uses
+  // the pre-rename name, so a missing stat never crashes the page.
+  const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const gooseLines = n(stats.plus1Lines ?? (stats as { gooseLines?: number }).gooseLines);
 
   return (
     <p className="mb-4 text-[13px] leading-relaxed text-fg-muted">
-      {n(stats.meetings)} meeting{stats.meetings === 1 ? "" : "s"} archived ·{" "}
-      {n(stats.lines)} lines transcribed, {n(stats.gooseLines)} of them spoken by
-      the goose ·{" "}
-      <span className="tnum font-medium text-fg">{fmtHours(stats.totalDurationMs)}</span>{" "}
-      in rooms
+      <span className="tnum font-medium text-fg">{n(stats.meetings)}</span> meeting{n(stats.meetings) === 1 ? "" : "s"} archived ·{" "}
+      <span className="tnum font-medium text-fg">{n(stats.lines).toLocaleString()}</span> lines transcribed,{" "}
+      <span className="tnum font-medium text-fg">{gooseLines.toLocaleString()}</span> of them spoken by the goose ·{" "}
+      <span className="tnum font-medium text-fg">{fmtHours(n(stats.totalDurationMs))}</span> in rooms
     </p>
   );
 }

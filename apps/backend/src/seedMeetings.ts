@@ -95,7 +95,7 @@ async function seed(): Promise<void> {
           act: true,
           action: "speak",
           confidence: 0.88,
-          reason: "Someone asked a factual question the goose could answer.",
+          reason: "Someone asked a factual question the plus1 could answer.",
           outcome: "spoke",
         },
       ],

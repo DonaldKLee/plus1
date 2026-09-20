@@ -137,6 +137,7 @@ export async function cacheSchemaAndPolicies(): Promise<{
         insured: true,
         claims: true,
         submission: true,
+        producer: { broker: true },
         exposure_units: { location: { buildings: true } },
       },
       pagination: { limit, offset },
@@ -175,7 +176,11 @@ export function loadCachedPolicies(): unknown[] | null {
     const raw = JSON.parse(
       fs.readFileSync(path.join(CACHE_DIR, "property-policies.json"), "utf8"),
     );
-    return raw.results ?? raw;
+    const results: unknown[] = raw.results ?? raw;
+    // Older caches never expanded producer.broker; refetch so brokers have names.
+    const first = results[0] as { producer?: { broker?: unknown } } | undefined;
+    if (first && typeof first.producer?.broker === "number") return null;
+    return results;
   } catch {
     return null;
   }

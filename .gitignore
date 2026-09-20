@@ -14,5 +14,9 @@ apps/backend/cache/
 *.tsbuildinfo
 apps/runner-profile/
 
+# plus1 local file-access sandbox
+plus1-files/
 # Goose local file-access sandbox
 goose-files/
+Federato_HTN2026_API_Challenge_Docs
+cache

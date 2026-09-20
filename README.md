@@ -1,8 +1,8 @@
 # plus1 (Hack the North 2026)
 
-Meeting coworker goose + **Federato underwriting pack** on `feat/federato-browserbase`.
+Meeting coworker plus1 + **Federato underwriting pack** on `feat/federato-browserbase`.
 
-The goose / camera / LiveAvatar seat is a teammate piece. This branch is the UW queue, appetite scoring, Browserbase Maps/FEMA work browser, and Playwright Meet Present.
+The plus1 / camera / LiveAvatar seat is a teammate piece. This branch is the UW queue, appetite scoring, Browserbase Maps/FEMA work browser, and Playwright Meet Present.
 
 ## What it does
 
@@ -31,7 +31,7 @@ npm install                   # from repo root
 
 Dashboard talks to the backend at `http://localhost:8787` (`apps/dashboard/.env.local.example`).
 
-The goose's face and voice come from `packages/liveavatar` (HeyGen LiveAvatar on the Meet tab's
+The plus1's face and voice come from `packages/liveavatar` (HeyGen LiveAvatar on the Meet tab's
 fake camera/mic) and `packages/voice` (ElevenLabs → PCM). No virtual audio devices needed: set
 `LIVEAVATAR_API_KEY`, `LIVEAVATAR_AVATAR_ID`, `ELEVENLABS_API_KEY` in `.env` (see `.env.example`).
 

@@ -164,7 +164,7 @@ export const SAMPLE_LINES: SampleLine[] = [
     "id": "e18",
     "t": 103000,
     "speaker": "Kevin",
-    "text": "perfect. good goose. that's everything — thanks all",
+    "text": "perfect. good plus1. that's everything — thanks all",
     "intent": "small_talk",
     "confidence": 0.1
   }

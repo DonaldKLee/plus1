@@ -28,7 +28,7 @@ import {
 import { bytesToBase64 } from "./pcm.js";
 import type { VideoQuality } from "./schemas.js";
 import { LiveAvatarSession, type SessionEndInfo, type SessionMedia } from "./session.js";
-import type { PcmSource, SpeakOptions, Utterance, UtteranceResult } from "./speaker.js";
+import type { PcmSource, SpeakOptions, Utterance, UtteranceResult, UtteranceOutcome } from "./speaker.js";
 import { fetchAudioAsPcm, type TextToSpeech } from "./tts.js";
 
 /** The slice of Playwright's Page we use, typed structurally so this package doesn't depend on playwright. */
@@ -54,10 +54,17 @@ export interface AvatarRigOptions {
   page?: Partial<PageMediaConfig>;
   /** Recreate the LiveAvatar session if it dies (max duration, server hiccup). Default true. */
   autoRestart?: boolean;
-  /** Backoff between restart attempts, ms. Default [1000, 3000, 8000]; the last value repeats. */
+  /** Backoff between restart attempts, ms. Default [500, 1500, 4000, 8000]; the last value repeats. */
   restartBackoffMs?: number[];
-  /** Give up restarting after this many consecutive failures. Default 5. */
+  /** Give up restarting after this many consecutive failures. Default 8. */
   maxRestartAttempts?: number;
+  /**
+   * Rotate to a fresh session this long BEFORE the current one hits its max
+   * duration, so the session dies while idle instead of mid-sentence. Sandbox
+   * sessions only live ~1-2 minutes, which is what makes this essential.
+   * Default 15 s. 0 disables.
+   */
+  renewLeadMs?: number;
   logger?: Logger;
 }
 
@@ -72,9 +79,21 @@ export interface RigEvents {
   page: [PageEvent];
   warning: [string];
   error: [Error];
+  /** The rig is ready to speak again after a restart or rotation. */
+  ready: [];
   /** Auto-restart gave up. The runner should report meeting.error and leave or continue chat-only. */
   dead: [Error];
 }
+
+/** Outcome of a resilient say(): what the room actually heard. */
+export interface SayResult {
+  outcome: UtteranceOutcome | "dropped";
+  /** How many times the line had to be sent before it landed. */
+  attempts: number;
+  error?: Error;
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export class AvatarRig extends EventEmitter<RigEvents> {
   private readonly opts: AvatarRigOptions;
@@ -86,6 +105,8 @@ export class AvatarRig extends EventEmitter<RigEvents> {
   private restartFailures = 0;
   private lastMediaState: PageMediaState = "idle";
   private ttsAbort: AbortController | null = null;
+  private renewTimer: ReturnType<typeof setTimeout> | null = null;
+  private rotating = false;
 
   constructor(opts: AvatarRigOptions) {
     super();
@@ -149,6 +170,83 @@ export class AvatarRig extends EventEmitter<RigEvents> {
     } catch (err) {
       this.log.warn(`reattach failed: ${(err as Error).message}`);
     }
+  }
+
+  /**
+   * Resolve once the rig can accept speech, or false if it didn't come back in
+   * time. Covers the window where a session died and is being replaced.
+   */
+  async waitUntilReady(timeoutMs = 20_000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (!this.stopped && Date.now() < deadline) {
+      if (this.session?.isReady) return true;
+      await sleep(200);
+    }
+    return Boolean(this.session?.isReady);
+  }
+
+  /**
+   * Say a line and actually see it through — the durable counterpart to
+   * speakText(). A LiveAvatar session has a hard max duration (about a minute in
+   * sandbox), so sooner or later a socket WILL close mid-sentence. speakText()
+   * reports that as a failed utterance and the line is simply lost; say() waits
+   * for the replacement session and sends the line again.
+   *
+   * Only retried when the room heard little or nothing. If most of the line
+   * already played, repeating it would be worse than dropping the tail.
+   */
+  say(
+    text: string,
+    opts: SpeakOptions & { retries?: number; readyTimeoutMs?: number; minDeliveredMs?: number } = {},
+  ): { done: Promise<SayResult> } {
+    return { done: this.sayAsync(text, opts) };
+  }
+
+  private async sayAsync(
+    text: string,
+    opts: SpeakOptions & { retries?: number; readyTimeoutMs?: number; minDeliveredMs?: number },
+  ): Promise<SayResult> {
+    const retries = opts.retries ?? 2;
+    const minDelivered = opts.minDeliveredMs ?? 2_500;
+    let lastError: Error | undefined;
+
+    for (let attempt = 1; attempt <= retries + 1; attempt++) {
+      if (this.stopped) return { outcome: "dropped", attempts: attempt - 1, error: lastError };
+
+      if (!(await this.waitUntilReady(opts.readyTimeoutMs ?? 20_000))) {
+        lastError = new LiveAvatarStateError(`avatar not ready (session ${this.sessionState})`);
+        continue;
+      }
+
+      let utt: Utterance;
+      try {
+        utt = this.speakText(text, opts);
+      } catch (err) {
+        // Lost the race with a session teardown; loop round and wait again.
+        lastError = err instanceof Error ? err : new Error(String(err));
+        await sleep(300);
+        continue;
+      }
+
+      const r = await utt.done;
+      if (r.outcome === "completed" || r.outcome === "empty") return { outcome: r.outcome, attempts: attempt };
+      // An interrupt is a deliberate decision by a human or the operator. Honour
+      // it — retrying would be talking over someone on purpose.
+      if (r.outcome === "interrupted") return { outcome: "interrupted", attempts: attempt };
+
+      lastError = r.error;
+      if (r.sentMs >= minDelivered) {
+        // The room heard the substance of it; don't make everyone sit through it twice.
+        this.emit("warning", `utterance cut off after ${Math.round(r.sentMs)}ms; not repeating it`);
+        return { outcome: "completed", attempts: attempt, error: r.error };
+      }
+      if (attempt <= retries) {
+        this.log.warn(`utterance failed after ${Math.round(r.sentMs)}ms (${r.error?.message ?? "unknown"}); retrying`);
+        this.emit("warning", `avatar dropped a line mid-sentence; saying it again`);
+      }
+    }
+
+    return { outcome: "dropped", attempts: retries + 1, error: lastError };
   }
 
   /** Speak text through the configured TTS. Preempts anything currently playing. */
@@ -224,6 +322,8 @@ export class AvatarRig extends EventEmitter<RigEvents> {
   /** Stop the session and clear the page back to the placeholder. */
   async stop(): Promise<void> {
     this.stopped = true;
+    if (this.renewTimer) clearTimeout(this.renewTimer);
+    this.renewTimer = null;
     this.ttsAbort?.abort();
     const s = this.session;
     this.session = null;
@@ -256,7 +356,67 @@ export class AvatarRig extends EventEmitter<RigEvents> {
     const media = await session.start();
     this.restartFailures = 0;
     this.emit("sessionMedia", media);
+    this.scheduleRenewal(media);
+    this.emit("ready");
     return media;
+  }
+
+  /**
+   * Replace the session shortly before it hits its max duration. Without this the
+   * session dies whenever it dies — usually halfway through a sentence, since
+   * that's when the rig is busy. Rotating early means the expiry lands on an
+   * idle rig and nobody in the meeting notices.
+   */
+  private scheduleRenewal(media: SessionMedia): void {
+    if (this.renewTimer) clearTimeout(this.renewTimer);
+    this.renewTimer = null;
+    const lead = this.opts.renewLeadMs ?? 15_000;
+    const lifeSec = media.maxSessionDurationSec;
+    if (!lead || !lifeSec) return;
+    const delay = Math.max(5_000, lifeSec * 1000 - lead);
+    this.log.debug(`session lives ${lifeSec}s; rotating in ${Math.round(delay / 1000)}s`);
+    this.renewTimer = setTimeout(() => void this.rotate(media), delay);
+    this.renewTimer.unref?.();
+  }
+
+  /** Swap in a fresh session, waiting for the current utterance to finish first. */
+  private async rotate(expiring: SessionMedia): Promise<void> {
+    if (this.stopped || this.rotating) return;
+    if (this.session?.media?.sessionId !== expiring.sessionId) return; // already replaced
+    this.rotating = true;
+    try {
+      // Let whatever is playing finish, but not past the session's actual expiry.
+      const hardStop = expiring.startedAt + (expiring.maxSessionDurationSec ?? 60) * 1000 - 2_000;
+      while (this.isSpeaking && Date.now() < hardStop && !this.stopped) await sleep(250);
+      if (this.stopped) return;
+      if (this.session?.media?.sessionId !== expiring.sessionId) return;
+
+      const old = this.session;
+      this.log.info(`rotating LiveAvatar session ${expiring.sessionId.slice(0, 8)} before it expires`);
+      try {
+        // openSession() overwrites this.session; the old session's `ended` handler
+        // no-ops because it checks identity, so this won't trigger a restart.
+        const media = await this.openSession();
+        await this.connectPage(media);
+        void old?.stop("USER_CLOSED").catch(() => {});
+        this.log.info("LiveAvatar session rotated");
+      } catch (err) {
+        // Put the old session back if it's still alive, so we keep talking on it
+        // until it really expires and the normal restart path takes over.
+        if (old?.isReady && this.session !== old) {
+          this.session = old;
+          // Expiry is imminent, so retry shortly rather than a full lifetime out.
+          if (this.renewTimer) clearTimeout(this.renewTimer);
+          this.renewTimer = setTimeout(() => void this.rotate(expiring), 3_000);
+          this.renewTimer.unref?.();
+        }
+        throw err;
+      }
+    } catch (err) {
+      this.emit("warning", `session rotation failed: ${(err as Error).message}; falling back to restart`);
+    } finally {
+      this.rotating = false;
+    }
   }
 
   private async connectPage(media: SessionMedia): Promise<void> {
@@ -269,6 +429,8 @@ export class AvatarRig extends EventEmitter<RigEvents> {
   private onSessionEnded(session: LiveAvatarSession, info: SessionEndInfo): void {
     if (this.session !== session) return; // an older session finishing after a restart
     this.session = null;
+    if (this.renewTimer) clearTimeout(this.renewTimer);
+    this.renewTimer = null;
     if (this.stopped || info.reason === "client_stop") return;
     this.log.warn(`LiveAvatar session ended (${info.reason}) after ${Math.round(info.uptimeMs / 1000)}s`);
     if (this.opts.autoRestart ?? true) void this.restart();
@@ -278,8 +440,10 @@ export class AvatarRig extends EventEmitter<RigEvents> {
   private async restart(): Promise<void> {
     if (this.restarting || this.stopped) return;
     this.restarting = true;
-    const backoffs = this.opts.restartBackoffMs ?? [1_000, 3_000, 8_000];
-    const max = this.opts.maxRestartAttempts ?? 5;
+    // Short first backoff: a session that hit its max duration can be replaced
+    // immediately, and every ms here is dead air in the meeting.
+    const backoffs = this.opts.restartBackoffMs ?? [500, 1_500, 4_000, 8_000];
+    const max = this.opts.maxRestartAttempts ?? 8;
     try {
       while (!this.stopped) {
         const wait = backoffs[Math.min(this.restartFailures, backoffs.length - 1)] ?? 8_000;

@@ -22,7 +22,7 @@ MEET_URL=https://meet.google.com/xxx-yyyy-zzz npm run backend:screenshare
 Or `POST /api/federato/present-meet` with `{ policyId, meetUrl }`.
 
 Opens Browserbase fullscreen live view, joins Meet as the saved profile, Presents tab `plus1-work`.
-Camera/goose stays teammate-owned.
+Camera/plus1 stays teammate-owned.
 
 ### Demo path
 

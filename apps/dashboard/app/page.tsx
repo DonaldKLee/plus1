@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Button, GooseMark, Wordmark } from "@/components/ui";
+import { Button, Plus1Mark, Wordmark } from "@/components/ui";
 import { Arrow } from "@/components/icons";
 import { SiteNav } from "@/components/site/SiteNav";
 import { WorldMap } from "@/components/site/WorldMap";
@@ -222,7 +222,7 @@ export default function LandingPage() {
           <div className="flex flex-col items-start gap-8 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="max-w-[16ch] text-[clamp(1.875rem,4vw,3rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-balance">
-                Send a goose to your next meeting.
+                Send a plus1 to your next meeting.
               </h2>
               <p className="mt-4 max-w-[52ch] text-[16.5px] leading-relaxed text-fg-muted">
                 Paste a Meet link, pick what it is there to do, and let it in.
@@ -307,7 +307,7 @@ export default function LandingPage() {
               at Hack the North 2026
             </p>
             <p className="flex items-center gap-2 text-[13px] text-fg-subtle">
-              <GooseMark size={15} className="text-fg-subtle" />
+              <Plus1Mark size={15} className="text-fg-subtle" />
               Honk.
             </p>
           </div>

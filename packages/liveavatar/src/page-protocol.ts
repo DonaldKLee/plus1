@@ -20,7 +20,7 @@ export interface PageMediaConfig {
   fit: "cover" | "contain";
   /** Backdrop colour used before the avatar is up and for letterboxing. */
   backdrop: string;
-  /** Text shown on the placeholder frame while connecting (goose name). */
+  /** Text shown on the placeholder frame while connecting (plus1 name). */
   label: string;
   /** Volume of the hidden monitor <audio> element (0 = silent locally, audio still reaches Meet). */
   monitorVolume: number;

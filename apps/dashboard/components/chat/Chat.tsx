@@ -2,21 +2,23 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
-import { GooseMark, Button, Chip, cx } from "@/components/ui";
-import { History, Plug } from "@/components/icons";
+import { Plus1Mark, Button, Chip, cx } from "@/components/ui";
+import { History, Plug, PageMark, External } from "@/components/icons";
+import { AGENT_URL } from "@/lib/session";
 import { createChat, sendChatMessage, type ChatMessage } from "@/lib/chat";
+import { QuoteCard } from "./QuoteCard";
 
 function readConfig(): { name?: string; servers?: Record<string, boolean>; localAccess?: string } {
   if (typeof window === "undefined") return {};
   try {
-    return JSON.parse(window.localStorage.getItem("plus1.goose.config") || "{}");
+    return JSON.parse(window.localStorage.getItem("plus1.plus1.config") || "{}");
   } catch {
     return {};
   }
 }
 
-function gooseName(): string {
-  return readConfig().name?.trim() || "Goose";
+function plus1Name(): string {
+  return readConfig().name?.trim() || "plus1";
 }
 
 type Tools = { federato: boolean; files: "off" | "read" | "write" };
@@ -40,7 +42,7 @@ const mkLocal = (role: ChatMessage["role"], text: string, kind: ChatMessage["kin
 const INTRO_SPEED_MS = 18; // ms per character
 
 export function Chat() {
-  const [name] = useState(gooseName);
+  const [name] = useState(plus1Name);
   const [tools, setTools] = useState<Tools>({ federato: true, files: "off" });
   const [chatId, setChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -88,7 +90,7 @@ export function Chat() {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, sending]);
 
-  // Keep the tool badges in sync with the Goose tab (which may be edited elsewhere).
+  // Keep the tool badges in sync with the plus1 tab (which may be edited elsewhere).
   useEffect(() => {
     const sync = () => setTools(readTools());
     sync();
@@ -129,7 +131,7 @@ export function Chat() {
               <h1 className="text-[26px] font-semibold tracking-[-0.04em] text-fg">{name}</h1>
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {tools.federato && <Chip color="var(--act)">federato</Chip>}
-                <Link href="/app/goose" title="configure in the Goose tab">
+                <Link href="/app/plus1" title="configure in the plus1 tab">
                   <Chip
                     color={
                       tools.files === "write"
@@ -180,6 +182,14 @@ export function Chat() {
                   {m.text}
                 </div>
               </div>
+            ) : m.kind === "quote" && m.quote ? (
+              <div key={m.id} className="flex gap-2.5">
+                <Plus1Mark size={22} className="mt-0.5 shrink-0 text-fg" />
+                <div className="min-w-0 max-w-[92%] flex-1">
+                  <QuoteCard q={m.quote} />
+                  <Extras m={m} />
+                </div>
+              </div>
             ) : m.kind === "tool" ? (
               <div key={m.id} className="flex gap-2.5">
                 <Spacer />
@@ -191,11 +201,12 @@ export function Chat() {
                   <pre className="tnum overflow-x-auto whitespace-pre-wrap rounded-[var(--r)] border border-border bg-bg-inset px-3 py-2.5 text-[12.5px] leading-relaxed text-fg-muted">
                     {m.text}
                   </pre>
+                  <Extras m={m} />
                 </div>
               </div>
             ) : (
               <div key={m.id} className="flex gap-2.5">
-                <GooseMark size={22} className="mt-0.5 shrink-0 text-fg" />
+                <Plus1Mark size={22} className="mt-0.5 shrink-0 text-fg" />
                 <div className="max-w-[80%] rounded-[var(--r-lg)] rounded-tl-[4px] border border-border bg-bg-subtle px-3.5 py-2 text-[14px] leading-relaxed text-fg">
                   {m.text}
                 </div>
@@ -205,7 +216,7 @@ export function Chat() {
 
           {sending && (
             <div className="flex gap-2.5">
-              <GooseMark size={22} className="mt-0.5 shrink-0 text-fg" />
+              <Plus1Mark size={22} className="mt-0.5 shrink-0 text-fg" />
               <div className="flex items-center gap-1 rounded-[var(--r-lg)] rounded-tl-[4px] border border-border bg-bg-subtle px-3.5 py-3">
                 <Dotty /> <Dotty d={0.15} /> <Dotty d={0.3} />
               </div>
@@ -253,6 +264,34 @@ export function Chat() {
 
 function Spacer() {
   return <span className="w-[22px] shrink-0" aria-hidden />;
+}
+
+/** PDF download + broker-call actions attached to a quote / next-step message. */
+function Extras({ m }: { m: ChatMessage }) {
+  if (!m.pdfUrl && !m.nextStep) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {m.pdfUrl && (
+        <a
+          href={`${AGENT_URL}${m.pdfUrl}`}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-[var(--r-sm)] border border-border bg-bg px-3 py-1.5 text-[12.5px] font-medium text-fg transition-colors hover:border-border-strong hover:bg-bg-raise"
+        >
+          <PageMark width={14} height={14} /> Download quote PDF
+          <External width={12} height={12} className="text-fg-subtle" />
+        </a>
+      )}
+      {m.nextStep && (
+        <Link
+          href="/app/meetings"
+          className="inline-flex items-center gap-1.5 rounded-[var(--r-sm)] bg-inverse-bg px-3 py-1.5 text-[12.5px] font-medium text-inverse-fg transition-opacity hover:opacity-85"
+        >
+          <History width={14} height={14} /> Book a broker call
+        </Link>
+      )}
+    </div>
+  );
 }
 
 function Dotty({ d = 0 }: { d?: number }) {

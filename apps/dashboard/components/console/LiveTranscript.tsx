@@ -280,7 +280,7 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
                   {archived
                     ? "No transcript was saved for this meeting."
                     : working
-                    ? "The goose is joining the room…"
+                    ? "The plus1 is joining the room…"
                     : status === "ended"
                       ? "This session has ended."
                       : "Listening. Transcript will appear as people speak."}
@@ -300,7 +300,7 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
                   className="text-[13.5px] leading-relaxed"
                   style={{ color: l.agent ? "var(--brand-text)" : "var(--fg)" }}
                 >
-                  {l.agent && <span className="mr-1.5 font-medium">{l.speaker ?? "goose"}:</span>}
+                  {l.agent && <span className="mr-1.5 font-medium">{l.speaker ?? "plus1"}:</span>}
                   {l.text}
                   {l.partial && (
                     <span
@@ -315,7 +315,7 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
             <div ref={endRef} />
           </div>
 
-          {/* Operator controls: make the goose speak by hand, or cut it off. The brain does the rest. */}
+          {/* Operator controls: make the plus1 speak by hand, or cut it off. The brain does the rest. */}
           {(live || working) && (
             <form onSubmit={submitSay} className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2.5">
               <span
@@ -327,7 +327,7 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
                 value={say}
                 onChange={(e) => setSay(e.target.value)}
                 disabled={!avatarReady || sending}
-                placeholder={avatarReady ? "make the goose say…" : "avatar warming up…"}
+                placeholder={avatarReady ? "make the plus1 say…" : "avatar warming up…"}
                 className="min-w-0 flex-1 disabled:opacity-50"
                 autoComplete="off"
               />
@@ -350,13 +350,13 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
         {/* Decisions */}
         <Panel as="section" className="flex min-h-0 flex-col overflow-hidden">
           <PanelHead
-            title="Goose decisions"
+            title="plus1 decisions"
             right={<span className="tnum text-[12px] text-fg-subtle">{acted.length} acted</span>}
           />
           <div className="min-h-0 flex-1 overflow-y-auto">
             {decisions.length === 0 && (
               <p className="px-4 py-10 text-center text-[13px] text-fg-subtle">
-                The goose reads every line and decides whether to speak, chat, or
+                The plus1 reads every line and decides whether to speak, chat, or
                 call a tool. Its reasoning shows up here.
               </p>
             )}

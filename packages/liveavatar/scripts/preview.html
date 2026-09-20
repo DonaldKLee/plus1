@@ -24,7 +24,7 @@
   <div id="status">state <b id="st">idle</b> · video <b id="vid">–</b> · audio <b id="aud">–</b> · session <b id="sid">–</b></div>
   <div id="meter"><i></i></div>
   <div class="row"><button id="start">start session</button><button id="stop" disabled>stop</button></div>
-  <input id="text" type="text" placeholder="what should the goose say?" value="hey, what are we actually working on today?" />
+  <input id="text" type="text" placeholder="what should the plus1 say?" value="hey, what are we actually working on today?" />
   <div class="row"><button id="speak" disabled>speak</button><button id="interrupt" disabled>interrupt</button></div>
   <div class="row"><input id="wav" type="file" accept=".wav,audio/wav" /><button id="speakwav" disabled>speak wav</button></div>
   <div class="row"><button id="honk" disabled>honk</button><button id="listen" disabled>listening pose</button><button id="idle" disabled>idle pose</button></div>
@@ -49,7 +49,7 @@
   const bridge = window.__plus1Avatar;
   bridge.configure({ label: "Reginald", monitorVolume: 1 }); // hear it locally in the preview
   bridge.installFakeMedia();
-  $("stage").appendChild(window.__gooseCanvas);
+  $("stage").appendChild(window.__plus1Canvas);
   // What Meet would receive as "camera + mic": prove the fake getUserMedia path works too.
   const gum = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
   log(`fake getUserMedia → ${gum.getVideoTracks().length} video, ${gum.getAudioTracks().length} audio track(s)`);

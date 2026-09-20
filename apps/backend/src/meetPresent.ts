@@ -216,9 +216,31 @@ async function waitForGoogleSession(page: Page, notes: string[]): Promise<void> 
 }
 
 async function clickJoinish(page: Page): Promise<string | null> {
+  // Prefer exact Meet prejoin controls — Ask to join / Join now — via role+name.
+  const preferred = [
+    page.getByRole("button", { name: /^ask to join$/i }),
+    page.getByRole("button", { name: /^join now$/i }),
+    page.getByRole("button", { name: /^join$/i }),
+    page.locator('button[jsname="Qx7uuf"]').first(), // Meet's common Join/Ask control
+  ];
+  for (const loc of preferred) {
+    try {
+      const btn = loc.first();
+      if (!(await btn.isVisible().catch(() => false))) continue;
+      const label =
+        (await btn.getAttribute("aria-label").catch(() => null)) ||
+        (await btn.innerText().catch(() => null)) ||
+        "join";
+      await btn.click({ timeout: 2000 });
+      return label.trim().slice(0, 40) || "join";
+    } catch {
+      /* try next */
+    }
+  }
+
   const names = [
-    /join now/i,
     /ask to join/i,
+    /join now/i,
     /rejoin/i,
     /join anyway/i,
     /join meeting/i,
@@ -226,19 +248,11 @@ async function clickJoinish(page: Page): Promise<string | null> {
     /join the call/i,
     /switch here/i,
     /continue here/i,
-    /continue$/i,
   ];
   for (const name of names) {
-    if (await clickNamed(page, name, 2500)) return name.source;
+    if (await clickNamed(page, name, 1200)) return name.source;
   }
-  const loose = page.locator("button, [role=button]").filter({ hasText: /join/i }).first();
-  try {
-    await loose.waitFor({ state: "visible", timeout: 4000 });
-    await loose.click({ timeout: 2000 });
-    return "button:has-text(join)";
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 async function dumpMeetDebug(page: Page, notes: string[]): Promise<void> {
@@ -273,7 +287,8 @@ export async function joinMeet(page: Page, notes: string[], opts: JoinOptions = 
   const muted = opts.muted !== false; // default: join muted
   await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
   await waitForGoogleSession(page, notes);
-  await page.waitForTimeout(2500);
+  // Short settle only — used to sleep 2.5s before every join.
+  await page.waitForTimeout(400);
   await dismissNoise(page);
 
   const nameBox = page.getByLabel(/your name/i).first();
@@ -483,6 +498,232 @@ export async function presentWorkTab(page: Page, notes: string[]): Promise<boole
     .isVisible()
     .catch(() => false);
   return presenting;
+}
+
+/** Click Meet's "Stop presenting" / "Stop sharing" so the plus1 leaves the share. */
+export async function stopPresentingWorkTab(page: Page, notes: string[] = []): Promise<boolean> {
+  const presenting = await page
+    .getByText(/you('re| are) presenting|stop presenting|presenting to everyone|you are sharing/i)
+    .first()
+    .isVisible()
+    .catch(() => false);
+  if (!presenting) {
+    notes.push("Not presenting — nothing to stop.");
+    return true;
+  }
+
+  const stopped =
+    (await clickNamed(page, /stop presenting/i, 4000)) ||
+    (await clickNamed(page, /stop sharing/i, 3000)) ||
+    (await clickNamed(page, /^stop$/i, 2000));
+
+  if (!stopped) {
+    notes.push("Could not find Stop presenting.");
+    return false;
+  }
+  notes.push("Clicked Stop presenting.");
+  await page.waitForTimeout(1500);
+
+  const still = await page
+    .getByText(/you('re| are) presenting|stop presenting|presenting to everyone/i)
+    .first()
+    .isVisible()
+    .catch(() => false);
+  if (still) {
+    notes.push("Still showing as presenting after stop click.");
+    return false;
+  }
+  notes.push("Stopped presenting.");
+  return true;
+}
+
+/**
+ * First names from the Meet *page* DOM (local Playwright Chrome — not Browserbase).
+ *
+ * Deterministic queries from a live Meet dump (no People-panel clicks):
+ *   [role=list][aria-label=Participants] > [role=listitem][data-participant-id]
+ *     → aria-label / span.zWGUib  (e.g. "Vaibhav Sharma")
+ *   button[aria-label^="More options for "]
+ *   span.notranslate on the self tile
+ *
+ * The Chrome profile is often the human's Google account, so that person shows
+ * as "(You)". Prefer remotes; if none, use self's first name so we still greet
+ * "Hi Vaibhav" instead of "everyone".
+ */
+const MEET_UI_NAME_BLOCK = new Set(
+  [
+    "you",
+    "me",
+    "devices",
+    "device",
+    "plus1",
+    "shannon",
+    "everyone",
+    "host",
+    "guest",
+    "unknown",
+    "anonymous",
+  ].map((s) => s.toLowerCase()),
+);
+
+function looksLikePersonFirstName(first: string): boolean {
+  const f = first.trim();
+  if (f.length < 2 || f.length > 24) return false;
+  if (MEET_UI_NAME_BLOCK.has(f.toLowerCase())) return false;
+  if (!/^[A-Za-z][a-zA-Z'’-]*$/.test(f)) return false;
+  return true;
+}
+
+function titleFirst(name: string): string {
+  const n = name.trim();
+  if (!n) return n;
+  return n.charAt(0).toUpperCase() + n.slice(1);
+}
+
+function firstNameOf(full: string, exclude: Set<string>): string | null {
+  const cleaned = full.trim();
+  if (!cleaned || MEET_UI_NAME_BLOCK.has(cleaned.toLowerCase())) return null;
+  const first = cleaned.split(/\s+/)[0] ?? cleaned;
+  if (!looksLikePersonFirstName(first)) return null;
+  if (exclude.has(first.toLowerCase()) || exclude.has(cleaned.toLowerCase())) return null;
+  return titleFirst(first);
+}
+
+export async function listMeetParticipantNames(
+  page: Page,
+  opts?: { exclude?: string[] },
+): Promise<string[]> {
+  if (page.isClosed()) return [];
+  const exclude = new Set(
+    (opts?.exclude ?? []).map((n) => n.trim().toLowerCase()).filter(Boolean),
+  );
+  exclude.add("you");
+  exclude.add("me");
+
+  try {
+    // Never open/close the People side panel — read whatever Meet already rendered.
+    const raw = await page.evaluate(() => {
+      const out: { name: string; self: boolean }[] = [];
+      const seen = new Set<string>();
+      const add = (name: string, self: boolean) => {
+        const n = name.replace(/\s*\(you\)/i, "").replace(/\s+/g, " ").trim();
+        if (n.length < 2 || n.length > 48) return;
+        const key = n.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        out.push({ name: n, self });
+      };
+
+      for (const el of document.querySelectorAll<HTMLElement>(
+        'div[role="list"][aria-label="Participants"] > div[role="listitem"][data-participant-id], div[role="listitem"][data-participant-id][aria-label]',
+      )) {
+        const label = (el.getAttribute("aria-label") || "").trim();
+        const named = (el.querySelector("span.zWGUib")?.textContent || "").replace(/\s+/g, " ").trim();
+        const name = label || named;
+        if (!name) continue;
+        const self =
+          !!el.querySelector(".NnTWjc") ||
+          /\(you\)/i.test(el.textContent || "") ||
+          /\(you\)/i.test(name);
+        add(name, self);
+      }
+
+      for (const span of document.querySelectorAll<HTMLElement>("span.zWGUib")) {
+        if (span.offsetParent === null) continue;
+        const name = (span.textContent || "").replace(/\s+/g, " ").trim();
+        if (!name) continue;
+        const row = span.closest("[data-participant-id], [role='listitem']");
+        const self =
+          !!row?.querySelector(".NnTWjc") ||
+          /\(you\)/i.test(row?.textContent || "") ||
+          /\(you\)/i.test(span.parentElement?.textContent || "");
+        add(name, self);
+      }
+
+      // Tile / overflow menu: aria-label="More options for Vaibhav Sharma"
+      for (const btn of document.querySelectorAll<HTMLElement>('button[aria-label^="More options for "]')) {
+        const label = (btn.getAttribute("aria-label") || "").replace(/^More options for\s+/i, "").trim();
+        if (!label) continue;
+        add(label, false);
+      }
+
+      // Self tile chip: <span class="notranslate">Vaibhav Sharma</span>
+      for (const span of document.querySelectorAll<HTMLElement>("span.notranslate")) {
+        if (span.offsetParent === null) continue;
+        const name = (span.textContent || "").replace(/\s+/g, " ").trim();
+        if (!name || name.length > 48) continue;
+        if (!/^[A-Za-z]/.test(name)) continue;
+        add(name, true);
+      }
+
+      return out;
+    });
+
+    const remotes: string[] = [];
+    const selves: string[] = [];
+    for (const row of raw) {
+      const nice = firstNameOf(row.name, exclude);
+      if (!nice) continue;
+      const bucket = row.self ? selves : remotes;
+      if (!bucket.some((x) => x.toLowerCase() === nice.toLowerCase())) bucket.push(nice);
+    }
+    // Remotes first; if the roster only has (You) — same Google account as the human — use that.
+    return (remotes.length ? remotes : selves).slice(0, 12);
+  } catch {
+    return [];
+  }
+}
+
+/** Hang up the Meet call (click Leave call), then the caller can close Chrome. */
+export async function leaveMeetCall(page: Page, notes: string[] = []): Promise<boolean> {
+  if (page.isClosed()) {
+    notes.push("Meet page already closed.");
+    return true;
+  }
+  const url = page.url();
+  if (!/meet\.google\.com/i.test(url)) {
+    notes.push("Not on a Meet page — nothing to leave.");
+    return true;
+  }
+
+  // Already back on the post-call / prejoin screen?
+  const leftAlready = await page
+    .getByText(/you left the meeting|return to home|rejoin|ready to join/i)
+    .first()
+    .isVisible()
+    .catch(() => false);
+  if (leftAlready) {
+    notes.push("Already left the meeting.");
+    return true;
+  }
+
+  const clicked =
+    (await clickNamed(page, /leave call/i, 4000)) ||
+    (await clickNamed(page, /end call/i, 2500)) ||
+    (await clickNamed(page, /^leave$/i, 2000));
+
+  if (!clicked) {
+    // Sometimes the leave control is an icon button with aria-label only.
+    const icon = page.locator('[aria-label*="Leave call" i], [data-tooltip*="Leave call" i], button[aria-label*="Leave" i]').first();
+    try {
+      await icon.waitFor({ state: "visible", timeout: 2500 });
+      await icon.click({ timeout: 2000 });
+      notes.push("Clicked Leave via aria-label.");
+    } catch {
+      notes.push("Could not find Leave call — will close the browser instead.");
+      return false;
+    }
+  } else {
+    notes.push("Clicked Leave call.");
+  }
+
+  // Meet sometimes asks "Leave without sending feedback?" / confirm.
+  await page.waitForTimeout(400);
+  await clickNamed(page, /leave without|just leave|^leave$/i, 1500);
+  await clickNamed(page, /^ok$/i, 800);
+
+  await page.waitForTimeout(800);
+  return true;
 }
 
 export async function presentLiveViewInMeet(opts: {

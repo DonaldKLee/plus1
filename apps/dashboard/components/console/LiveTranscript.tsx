@@ -7,7 +7,6 @@ import { Arrow } from "@/components/icons";
 import {
   STATUS_LABEL,
   fmtClock,
-  filler,
   honk,
   interrupt,
   fetchSession,
@@ -333,9 +332,6 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
               />
               <Button type="submit" variant="primary" size="sm" disabled={!avatarReady || sending || !say.trim()}>
                 Say it
-              </Button>
-              <Button type="button" variant="secondary" size="sm" disabled={!avatarReady} onClick={() => void filler(sessionId, "ack")}>
-                “on it”
               </Button>
               <Button type="button" variant="secondary" size="sm" disabled={!avatarReady} onClick={() => void interrupt(sessionId)}>
                 Interrupt

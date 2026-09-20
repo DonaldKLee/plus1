@@ -12,6 +12,7 @@ import Browserbase from "@browserbasehq/sdk";
 import { chromium, type Browser, type CDPSession, type Page } from "playwright-core";
 import { CACHE_DIR, ensureCacheDir, envOptional } from "./env.js";
 import { fetchLiveViewUrl } from "./workCamContext.js";
+import { emitWorkHold } from "./workHold.js";
 
 const AGENT_NAME = "plus1-jev";
 const CACHE_FILE = path.join(CACHE_DIR, "jev-work.json");
@@ -104,19 +105,115 @@ function writeCache(data: Cache): void {
   fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2));
 }
 
+/** Demo / Harbor Point primary — used when they ask for a flood map without an address. */
+const FEMA_DEMO_ADDRESS = "44 Cedar Ln, Tampa, FL";
+const FEMA_MSC_SEARCH = "https://msc.fema.gov/portal/search";
+
+function isFloodMapTask(task: string): boolean {
+  return /flood\s*map|fema|nfhl|firmette|flood\s*zone|msc\.fema/i.test(task);
+}
+
+/** Buying a house / show the property / Street View — Google Maps, not FEMA. */
+function isHouseViewTask(task: string): boolean {
+  if (isFloodMapTask(task)) return false;
+  return (
+    /\bstreet\s*view\b|\bpegman\b/i.test(task) ||
+    /\b(house|home|property|listing|address)\b/i.test(task) ||
+    /\b(show|pull\s*up|look\s*(at|up)|open)\b.*\b(map|maps)\b/i.test(task) ||
+    /\bgoogle\s+maps\b/i.test(task)
+  );
+}
+
+/** Pull a US-looking street address out of free text, if present. */
+function extractStreetAddress(task: string): string | undefined {
+  const m = task.match(
+    /\b\d{1,5}\s+[A-Za-z0-9.'’-]+(?:\s+[A-Za-z0-9.'’-]+){0,5}\s*,\s*[A-Za-z .'-]+(?:,\s*[A-Z]{2})?(?:\s+\d{5}(?:-\d{4})?)?\b/,
+  );
+  if (m?.[0]) return m[0].replace(/\s+/g, " ").trim();
+  // Harbor Point / Tampa warehouse shorthand from the UW demo
+  if (/harbor\s*point|tampa\s*warehouse|cedar\s*ln|cedar\s*lane/i.test(task)) {
+    return FEMA_DEMO_ADDRESS;
+  }
+  return undefined;
+}
+
+function mapsSearchUrl(address: string): string {
+  // Place/search URL — never /maps/dir/ (Directions).
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+}
+
+/**
+ * Rewrite high-stakes demo tasks into deterministic Browserbase agent steps.
+ * Flood map → FEMA MSC. House / Street View → Google Maps place + exterior SV.
+ */
+function normalizeBrowserTask(task: string): string {
+  const trimmed = task.replace(/\s+/g, " ").trim();
+  if (!trimmed) return trimmed;
+
+  if (isFloodMapTask(trimmed)) {
+    const address = extractStreetAddress(trimmed) || FEMA_DEMO_ADDRESS;
+    return [
+      `Open ${FEMA_MSC_SEARCH} immediately (FEMA Flood Map Service Center — Search by Address).`,
+      `Do NOT open Google, Google Maps, google.com, or any other website first.`,
+      `In the address search field, type exactly this full address and submit/search: ${address}`,
+      `Wait until the flood map / Dynamic Map / FIRMette (or search results) for that address is visible.`,
+      `Leave that FEMA flood map page on screen. Do not close the browser or navigate away.`,
+    ].join("\n");
+  }
+
+  if (isHouseViewTask(trimmed)) {
+    const address = extractStreetAddress(trimmed);
+    if (!address) {
+      return [
+        trimmed,
+        "",
+        "Use Google Maps (normal place/search page — NOT Directions, NOT a google.com search).",
+        "If an address is present, open Street View from the STREET looking at the FRONT of the building — never indoor/interior Street View.",
+      ].join("\n");
+    }
+    return [
+      `Open this Google Maps place/search URL (normal Maps — NOT Directions, NOT /maps/dir/, NOT google.com):`,
+      mapsSearchUrl(address),
+      `Confirm the pin for exactly: ${address}`,
+      `Open Street View at this address.`,
+      `CRITICAL: stand on the STREET / curb looking at the FRONT exterior of the house or building. Do NOT enter the building. Do NOT use indoor / interior / inside Street View. Do NOT walk through the front door.`,
+      `Leave that exterior Street View on screen. Do not close the browser or navigate away.`,
+    ].join("\n");
+  }
+
+  return trimmed;
+}
+
 function promptStartUrl(task: string): string {
   const explicit = task.match(/https?:\/\/[^\s]+/i)?.[0];
-  if (explicit) return explicit.replace(/[.,;)]+$/, "");
-  if (/wordle/i.test(task)) return "https://www.nytimes.com/games/wordle/index.html";
-  if (/maps/i.test(task)) {
-    const m = task.match(/search(?:\s+for)?\s+(?:the\s+)?(.+?)(?:,|\.| then| and | so i|$)/i);
-    const q = (m?.[1] ?? task).replace(/google maps/gi, "").trim().slice(0, 140);
-    if (q.length > 3) {
-      return `https://www.google.com/maps/search/${encodeURIComponent(q)}`;
+  if (explicit) {
+    const url = explicit.replace(/[.,;)]+$/, "");
+    // Never seed Directions even if the model pasted a /dir/ link.
+    if (/google\.[^/]+\/maps\/dir/i.test(url)) {
+      const addr = extractStreetAddress(task);
+      return addr ? mapsSearchUrl(addr) : "https://www.google.com/maps";
     }
+    return url;
+  }
+  // Flood map BEFORE the generic "maps" branch — "flood map" must not become Google Maps.
+  if (isFloodMapTask(task) || /msc\.fema\.gov/i.test(task)) {
+    return FEMA_MSC_SEARCH;
+  }
+  if (/wordle/i.test(task)) return "https://www.nytimes.com/games/wordle/index.html";
+
+  if (isHouseViewTask(task) || (/\b(google\s+)?maps\b|street view|pegman/i.test(task) && !isFloodMapTask(task))) {
+    const addr = extractStreetAddress(task);
+    if (addr) return mapsSearchUrl(addr);
     return "https://www.google.com/maps";
   }
-  const search = task.replace(/\s+/g, " ").trim().slice(0, 120);
+
+  // Default landing / search on google.com (not Maps).
+  const search = task
+    .replace(/\b(share your screen|share screen|pull up|look up|show me|on the web|browser)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
+  if (!search || search.length < 3) return "https://www.google.com";
   return `https://www.google.com/search?q=${encodeURIComponent(search)}`;
 }
 
@@ -125,77 +222,98 @@ async function snapshot(page: Page): Promise<string> {
   const title = await page.title().catch(() => "");
   const bits = await page
     .evaluate(() => {
-      const els = [...document.querySelectorAll("a, button, input, textarea, [role='button'], [aria-label]")];
-      return els.slice(0, 35).map((el) => {
+      const out: { tag: string; text: string }[] = [];
+      const push = (tag: string, text: string) => {
+        const t = text.replace(/\s+/g, " ").trim().slice(0, 100);
+        if (t.length >= 2) out.push({ tag, text: t });
+      };
+      for (const h of document.querySelectorAll("h1, h2")) {
+        push("heading", (h as HTMLElement).innerText || "");
+      }
+      for (const el of document.querySelectorAll("a, button, input, textarea, [role='button'], [aria-label]")) {
+        if (out.length >= 40) break;
         const h = el as HTMLElement;
-        return {
-          tag: h.tagName.toLowerCase(),
-          text: (h.innerText || h.getAttribute("aria-label") || h.getAttribute("placeholder") || "")
-            .replace(/\s+/g, " ")
-            .trim()
-            .slice(0, 80),
-        };
-      }).filter((x) => x.text);
+        push(
+          h.tagName.toLowerCase(),
+          h.innerText || h.getAttribute("aria-label") || h.getAttribute("placeholder") || h.getAttribute("value") || "",
+        );
+      }
+      return out;
     })
-    .catch(() => []);
+    .catch(() => [] as { tag: string; text: string }[]);
   return `url: ${url}\ntitle: ${title}\ncontrols:\n${bits.map((b) => `- ${b.tag}: ${b.text}`).join("\n")}`;
 }
 
-async function geminiNextAction(
-  task: string,
-  snap: string,
-  history: string[],
-): Promise<{ action: string; url?: string; text?: string; key?: string; note?: string }> {
-  const key = envOptional("GEMINI_API_KEY");
-  if (!key) return { action: "done", note: "no GEMINI_API_KEY" };
-  const model = process.env.GEMINI_BRAIN_MODEL || "gemini-flash-lite-latest";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-  const schema = {
-    type: "object",
-    properties: {
-      action: { type: "string", enum: ["goto", "click", "type", "press", "wait", "done"] },
-      url: { type: "string" },
-      text: { type: "string" },
-      key: { type: "string" },
-      note: { type: "string" },
-    },
-    required: ["action", "note"],
-  };
-  const res = await fetch(url, {
+type PageAction = { action: string; url?: string; text?: string; key?: string; note?: string };
+
+const PAGE_DRIVER_SYSTEM = `You drive a cloud Chrome browser that is being screenshared into a live meeting.
+
+Goal: make the RESULT visible on screen so people watching the share can see it. Prefer concrete pages over search result lists when you can.
+
+Rules:
+- One action per turn. Pick the smallest next step that advances the task.
+- Prefer action "goto" with a full https URL when you know where to go (Maps search URL, a company contact page, Google search URL, etc.).
+- "click" uses visible button/link text from PAGE controls — copy the text closely.
+- "type" types into the focused field; "press" is usually Enter after typing a search.
+- "wait" only if the page is clearly loading.
+- Use "done" ONLY when the useful answer is already on screen (address, phone, map pin, article, filled form). Do NOT done after a generic Google homepage or a bare search box.
+- If the last step failed, try a different approach (new goto URL, different click text) — do not repeat the same failed click.
+- Keep notes short (what you are trying).`;
+
+function pageDriverUserPrompt(task: string, snap: string, history: string[]): string {
+  return `TASK (show this on screen for the meeting):
+${task}
+
+CURRENT PAGE:
+${snap}
+
+STEPS SO FAR:
+${history.join("\n") || "(none yet — usually start with goto to a useful URL)"}
+
+Return the next single JSON action.`;
+}
+
+async function openaiNextAction(task: string, snap: string, history: string[]): Promise<PageAction> {
+  const key = envOptional("OPENAI_API_KEY");
+  if (!key) return { action: "done", note: "no OPENAI_API_KEY" };
+  const model = envOptional("OPENAI_BROWSER_MODEL") ?? "gpt-4o-mini";
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      authorization: `Bearer ${key}`,
+      "content-type": "application/json",
+    },
     body: JSON.stringify({
-      systemInstruction: {
-        parts: [
-          {
-            text: "You operate a cloud Chrome via Playwright. Complete the user's task with one action per turn. Prefer goto with a full URL when possible (Google Maps search URLs, Pegman/street view, new Google searches). click uses visible button/link text. type types into the focused field. press is a key like Enter. done when the task is complete enough to show on screen.",
-          },
-        ],
-      },
-      contents: [
+      model,
+      temperature: 0.15,
+      response_format: { type: "json_object" },
+      messages: [
         {
-          role: "user",
-          parts: [
-            {
-              text: `TASK:\n${task}\n\nPAGE:\n${snap}\n\nALREADY DID:\n${history.join("\n") || "(nothing)"}\n\nNext single action.`,
-            },
-          ],
+          role: "system",
+          content: `${PAGE_DRIVER_SYSTEM}
+
+Reply with ONLY a JSON object:
+{"action":"goto"|"click"|"type"|"press"|"wait"|"done","url":"...","text":"...","key":"...","note":"..."}
+Omit unused fields. action and note are required.`,
         },
+        { role: "user", content: pageDriverUserPrompt(task, snap, history) },
       ],
-      generationConfig: {
-        temperature: 0.2,
-        responseMimeType: "application/json",
-        responseSchema: schema,
-      },
     }),
   });
-  if (!res.ok) throw new Error(`gemini ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  if (!res.ok) throw new Error(`openai ${res.status}: ${(await res.text()).slice(0, 160)}`);
   const json = (await res.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
+    choices?: { message?: { content?: string } }[];
   };
-  const raw = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+  const raw = json.choices?.[0]?.message?.content ?? "{}";
   try {
-    return JSON.parse(raw) as { action: string; url?: string; text?: string; key?: string; note?: string };
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      action: String(parsed.action ?? "done"),
+      url: typeof parsed.url === "string" ? parsed.url : undefined,
+      text: typeof parsed.text === "string" ? parsed.text : undefined,
+      key: typeof parsed.key === "string" ? parsed.key : undefined,
+      note: typeof parsed.note === "string" ? parsed.note : undefined,
+    };
   } catch {
     return { action: "done", note: "bad json" };
   }
@@ -217,19 +335,36 @@ async function applyAction(
     case "click": {
       const name = act.text?.trim();
       if (!name) throw new Error("click missing text");
-      const loc = page.getByRole("button", { name: new RegExp(name, "i") }).first();
-      if (await loc.isVisible().catch(() => false)) {
-        await loc.click({ timeout: 8_000 });
-        break;
+      const re = new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      const candidates = [
+        page.getByRole("link", { name: re }).first(),
+        page.getByRole("button", { name: re }).first(),
+        page.getByText(re).first(),
+      ];
+      let clicked = false;
+      for (const loc of candidates) {
+        if (await loc.isVisible().catch(() => false)) {
+          await loc.click({ timeout: 8_000 });
+          clicked = true;
+          break;
+        }
       }
-      await page.getByText(name, { exact: false }).first().click({ timeout: 8_000 });
+      if (!clicked) throw new Error(`click target not found: ${name}`);
       break;
     }
     case "type": {
       const value = act.text ?? "";
       const focused = page.locator(":focus");
       if (await focused.count()) await focused.fill(value);
-      else await page.keyboard.type(value, { delay: 20 });
+      else {
+        const box = page.locator("input:visible, textarea:visible, [contenteditable='true']").first();
+        if (await box.count()) {
+          await box.click({ timeout: 3_000 });
+          await box.fill(value);
+        } else {
+          await page.keyboard.type(value, { delay: 20 });
+        }
+      }
       break;
     }
     case "press": {
@@ -241,34 +376,67 @@ async function applyAction(
       break;
     }
     default:
-      break;
+      throw new Error(`unknown action: ${act.action}`);
   }
-  await page.waitForTimeout(800).catch(() => undefined);
+  await page.waitForTimeout(900).catch(() => undefined);
 }
 
-async function runPromptOnPage(page: Page, task: string, notes: string[]): Promise<void> {
-  notes.push(`running prompt on ${page.url()}`);
-  const history: string[] = [];
-  for (let i = 0; i < 10; i++) {
+async function runPromptOnPage(
+  page: Page,
+  task: string,
+  notes: string[],
+  opts?: { seededGoto?: string },
+): Promise<void> {
+  if (!envOptional("OPENAI_API_KEY")) {
+    notes.push("page driver needs OPENAI_API_KEY");
+    return;
+  }
+  notes.push(`running prompt on ${page.url()} (openai)`);
+  const history: string[] = opts?.seededGoto ? [`goto ${opts.seededGoto}`] : [];
+  // Seeded navigation counts — otherwise the model can "done" on a blank tab,
+  // or we reject a legit done when the start URL already shows the answer.
+  let applied = opts?.seededGoto ? 1 : 0;
+  let earlyDoneRejects = 0;
+  for (let i = 0; i < 14; i++) {
     const snap = await snapshot(page);
-    let next: Awaited<ReturnType<typeof geminiNextAction>>;
+    let next: PageAction;
     try {
-      next = await geminiNextAction(task, snap, history);
+      next = await openaiNextAction(task, snap, history);
     } catch (e) {
-      notes.push(`gemini: ${(e as Error).message}`);
+      notes.push(`openai: ${(e as Error).message}`);
       break;
     }
     if (next.action === "done") {
+      // Only force more work if we never moved the page meaningfully.
+      if (applied < 1 || (applied === 1 && opts?.seededGoto && earlyDoneRejects < 1)) {
+        // One nudge: after only the seed goto, ask for one more concrete step
+        // (click a result, open street view) before accepting done.
+        if (applied === 1 && opts?.seededGoto && earlyDoneRejects < 1) {
+          earlyDoneRejects++;
+          notes.push(`nudged past early done (${next.note ?? "no note"}) — try one more visible step`);
+          history.push(`REJECTED early done: ${next.note ?? ""} — do one more step so the result is obvious on screen`);
+          continue;
+        }
+        if (applied < 1) {
+          notes.push(`ignored early done (${next.note ?? "no note"}) — need at least one real step`);
+          history.push(`REJECTED early done: ${next.note ?? ""}`);
+          continue;
+        }
+      }
       notes.push(`prompt done: ${next.note ?? ""}`);
       break;
     }
     try {
       await applyAction(page, next, notes);
+      applied++;
       history.push(`${next.action} ${next.url ?? next.text ?? next.key ?? ""}`.trim());
     } catch (e) {
       notes.push(`step failed: ${(e as Error).message}`);
       history.push(`FAILED ${next.action}: ${(e as Error).message}`);
     }
+  }
+  if (applied <= (opts?.seededGoto ? 1 : 0)) {
+    notes.push("page driver finished with no successful steps beyond the start URL");
   }
 }
 
@@ -342,7 +510,7 @@ function stubStagehand(notes: string[]): Live["stagehand"] {
 async function launchNewSession(
   notes: string[],
   agentId: string | undefined,
-  startUrl = "https://www.google.com/maps",
+  startUrl = "https://www.google.com",
 ): Promise<Live> {
   const pid = projectId();
   const bb = bbClient();
@@ -387,7 +555,7 @@ async function reconnectSession(
   agentId: string | undefined,
 ): Promise<Live> {
   notes.push(`Reconnecting to persistent session ${sessionId} via Playwright CDP`);
-  const pw = await playwrightOpen(sessionId, "https://www.google.com/maps", notes);
+  const pw = await playwrightOpen(sessionId, "https://www.google.com", notes);
   const liveViewUrl = await fetchLiveViewUrl(sessionId, {
     expiresIn: SESSION_TIMEOUT_SEC,
     waitMs: 15_000,
@@ -490,6 +658,8 @@ async function startJevRun(
   const bb = bbClient();
   const agentId = await ensureAgent(notes);
   notes.push("Starting jev run (uses 1 of 15 agent runs).");
+  // Swap Present off the dying live-view before the next session attaches.
+  emitWorkHold();
   // keepAlive is not a runs.create field — the OpenAPI schema rejects it.
   // We pin CDP below so the session survives when the runner disconnects.
   const run = await bb.agents.runs.create({
@@ -572,6 +742,8 @@ async function watchJevRun(runId: string, notes: string[]): Promise<void> {
       if (!["COMPLETED", "FAILED", "STOPPED", "TIMED_OUT"].includes(cur.status)) continue;
 
       notes.push(`jev ${cur.status} — keeping the browser open`);
+      // Agent live-view shows "disconnected" — Present the logo hold screen instead.
+      emitWorkHold();
       const sessionId = cur.sessionId ?? live?.sessionId;
       const rec = cur as unknown as Record<string, unknown>;
       const detail = [
@@ -601,7 +773,7 @@ async function watchJevRun(runId: string, notes: string[]): Promise<void> {
       const next = await launchNewSession(
         notes,
         cur.agentId ?? live?.agentId,
-        url || "https://www.google.com/maps",
+        url || "https://www.google.com",
       );
       next.lastRun = live?.lastRun ?? { status: cur.status, url, detail: detail || undefined };
       live = next;
@@ -623,12 +795,28 @@ export async function startJevOrStagehand(
   notes: string[],
   opts?: { waitForTask?: boolean },
 ): Promise<JevSession> {
-  notes.push(`prompt: ${task.slice(0, 160)}`);
-  try {
-    notes.push("Starting a new jev agent run");
-    return await startJevRun(task, notes, opts?.waitForTask);
-  } catch (e) {
-    notes.push(`jev run failed: ${(e as Error).message}`);
+  const normalized = normalizeBrowserTask(task);
+  if (normalized !== task.replace(/\s+/g, " ").trim()) {
+    notes.push(
+      isFloodMapTask(task)
+        ? "rewrote flood-map task → FEMA MSC + full address"
+        : "rewrote house/maps task → Google Maps place + exterior Street View",
+    );
+  }
+  notes.push(`prompt: ${normalized.slice(0, 200)}`);
+  const skipAgents =
+    envOptional("BROWSERBASE_SKIP_AGENTS") === "1" ||
+    /^(1|true|yes)$/i.test(envOptional("BROWSER_FALLBACK_ONLY") ?? "");
+
+  if (!skipAgents) {
+    try {
+      notes.push("Starting a new jev agent run");
+      return await startJevRun(normalized, notes, opts?.waitForTask);
+    } catch (e) {
+      notes.push(`jev run failed: ${(e as Error).message}`);
+    }
+  } else {
+    notes.push("Skipping Browserbase agents (BROWSERBASE_SKIP_AGENTS) — OpenAI page driver");
   }
 
   if (!attachLock) {
@@ -638,7 +826,7 @@ export async function startJevOrStagehand(
   }
   const handle = await attachLock;
   const page = handle.page;
-  const start = promptStartUrl(task);
+  const start = promptStartUrl(normalized);
   const view = await fetchLiveViewUrl(handle.sessionId, {
     expiresIn: SESSION_TIMEOUT_SEC,
     waitMs: 15_000,
@@ -646,17 +834,21 @@ export async function startJevOrStagehand(
   handle.liveViewUrl = view;
   notes.push(`live view: ${view}`);
 
-  // Gemini drives the existing cloud Chrome when jev is unavailable.
+  // OpenAI page driver continues the task on the keepAlive cloud Chrome.
   handle.running = (async () => {
     if (!page) return;
     try {
       notes.push(`navigating for prompt → ${start}`);
       await page.goto(start, { waitUntil: "domcontentloaded", timeout: 60_000 });
       notes.push(`now at ${page.url()}`);
-      await runPromptOnPage(page, task, notes);
-      handle.lastRun = { status: "gemini", url: page.url(), detail: "gemini finished on the work browser" };
+      await runPromptOnPage(page, normalized, notes, { seededGoto: start });
+      handle.lastRun = {
+        status: "openai",
+        url: page.url(),
+        detail: "openai finished on the work browser",
+      };
     } catch (err) {
-      notes.push(`gemini-on-page: ${(err as Error).message}`);
+      notes.push(`openai-on-page: ${(err as Error).message}`);
       handle.lastRun = { status: "FAILED", url: page.url(), detail: (err as Error).message };
     }
   })();
@@ -670,7 +862,7 @@ export async function attachWorkBrowser(notes: string[]): Promise<JevSession> {
   return toJev(handle);
 }
 
-/** Wait until the in-flight jev (or Gemini fallback) finishes. Browser stays open. */
+/** Wait until the in-flight jev or OpenAI page-driver finishes. Browser stays open. */
 export async function waitForCurrentJevRun(): Promise<JevRunInfo | undefined> {
   const p = live?.running;
   if (p) await p.catch(() => undefined);
@@ -689,9 +881,9 @@ export async function screenshotWorkBrowser(): Promise<Buffer | undefined> {
 }
 
 const DEFAULT_JEV_TASK =
-  "Open Google Maps and leave the map on screen. Do not close the browser.";
+  "Open https://www.google.com and leave the homepage on screen. Do not close the browser.";
 
-/** Always a new jev run. Blank task still runs jev with a Maps default. */
+/** Always a new jev run. Blank task still runs jev with a google.com default. */
 export async function startWorkBrowser(notes: string[], task?: string): Promise<JevSession> {
   return startJevOrStagehand(task?.trim() || DEFAULT_JEV_TASK, notes);
 }

@@ -79,6 +79,8 @@ export interface SessionDetail {
   lines: TranscriptLine[];
   decisions: DecisionRecord[];
   live: boolean;
+  /** Talk stack for this session: Gemini Live + ElevenLabs, or OpenAI Realtime. */
+  talkBackend?: "legacy" | "openai";
 }
 
 export interface MeetingStats {

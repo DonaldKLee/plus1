@@ -180,23 +180,7 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
     });
   }
   if (access.docs) {
-    tools.push({
-      name: "doc_pdf",
-      doc: `doc_pdf — turn text into a real PDF someone can download, open from a link, or be emailed (meeting notes, a recap, action items, a summary, a one-pager, a comparison). Call it whenever someone asks for "notes", "a writeup", "a summary", "a doc", or "a PDF". You WRITE the content yourself from the meeting — don't ask them to dictate it.
-
-COVER WHAT WAS ASKED FOR. Re-read the request and put every single thing it named in the document. If they asked for pricing, the prices are in it. If they asked for next steps, the owners and dates are in it. Never invent a value and never write a bare "[insert]" placeholder. If something they asked for genuinely never came up, still give it a line and say so plainly — "not discussed on this call", or "Marcus to confirm the deductible" — because a silently missing figure reads as an answer, and this is the exact failure that makes these documents useless.
-
-CARRY THE NUMBERS. Every figure, price, date, percentage, deadline, limit, deductible, count and name that came up goes in verbatim — do not round, do not summarize a number away, do not describe a number in words. Two or more comparable figures belong in a markdown table, never in a sentence.
-
-tool.details:
-- title — what this document is.
-- subtitle (optional) — the date, the meeting, or who it's for.
-- figures (optional but use it whenever numbers matter) — up to 6 key figures as [{label, value, note}], e.g. [{"label":"Annual premium","value":"$1,847","note":"12-month term"}]. These print large at the top, which is the first thing the reader looks for.
-- body — the full document in markdown. Supported and rendered properly: # / ## / ### headings, - bullets (and indented sub-bullets), 1. numbered lists, "- [ ] task" / "- [x] done" checklists for action items, | markdown | tables | with |---:| alignment for anything numeric, > callouts for a caveat, --- rules, **Term**: value lines for specs, and inline **bold**, *italic*, \`code\`, [label](url).
-- filename (optional).
-
-NEVER read the resulting link out loud, character by character or otherwise — it's posted into the meeting chat automatically as a public Appwrite URL. Just say it's in the chat.`,
-    });
+    // doc_pdf not offered — use federato_quote_pdf / intact_quote_pdf for PDFs.
   }
   if (access.email) {
     tools.push({
@@ -222,7 +206,11 @@ NEVER read the resulting link out loud, character by character or otherwise — 
   if (access.browser !== false) {
     tools.push({
       name: "browser_work",
-      doc: `browser_work(query) — share YOUR screen into this Meet (Present the Browserbase work tab) and have the cloud browser agent actually do the task on screen. Call this in the SAME turn whenever someone asks you to share your screen, pull something up, look something up on the web, demo a site, play a game, or "show me". Put the full task in tool.query — include any address, name, URL, or details from the meeting. After it finishes, LEAVE THE SCREEN UP for follow-up asks (another browser_work reuses the same window). Do not stop sharing unless they explicitly tell you to. Dedicated tools (federato_*, intact_*, doc_pdf, email_*) still win when they match; this is for doing something visible on screen.`,
+      doc: `browser_work(query) — share YOUR screen and have the cloud browser do the task. House / property: include the full street address — opens Google Maps place search (NOT Directions), then exterior Street View from the curb facing the front (never indoors). Flood map / FEMA: "flood map for <address>" → msc.fema.gov. After it finishes, status goes to Meet chat; spoken "say" is ONE short line. Leave the share up.`,
+    });
+    tools.push({
+      name: "browser_unshare",
+      doc: `browser_unshare() — stop presenting / stop sharing your screen in this Meet. Call when someone says "stop sharing", "stop presenting", "you can stop", "unshare", or "take your screen down". Does not close the work browser — only leaves Present.`,
     });
   }
   return tools;
@@ -293,9 +281,11 @@ WORKED EXAMPLES (what someone says → what you do, in the same turn):
   const browserNote = opts.tools.some((t) => t.name === "browser_work")
     ? `
 SCREEN SHARE: you have a live Browserbase work browser you can Present into this Meet.
-- "share your screen and …" / "pull this up" / "show me …" / "look that up on the web" → action="tool", tool.name="browser_work", tool.query=the full task (include names, addresses, URLs from the transcript), say="sharing my screen, one sec".
+- "share your screen and …" / "pull this up" / "show me …" / "look that up on the web" → action="tool", tool.name="browser_work", tool.query=the full task (include names, addresses, URLs from the transcript), say="one sec, sharing". After it returns, keep say to one short line — details go to Meet chat.
+- "show the house" / "pull up the property" / Street View → browser_work with the FULL street address they gave; Google Maps place page + exterior Street View from the curb (never Directions, never indoors).
+- "show the flood map" / "pull up FEMA" → browser_work "flood map for <address>" (FEMA MSC, not Google Maps).
 - After it returns, the share STAYS UP. Follow-up asks ("now search for X", "click into that") are another browser_work — do not stop presenting.
-- Only stop if they explicitly say stop / stop sharing / you can stop presenting. Until then, leave the window there waiting.
+- "stop sharing" / "stop presenting" / "unshare" / "you can stop" → action="tool", tool.name="browser_unshare", say="stopping the share".
 - If they just say "share your screen" with no task, still call browser_work with a sensible default from context (the thing you were just talking about) rather than asking what to share.
 `
     : "";

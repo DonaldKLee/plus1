@@ -4,6 +4,9 @@
  * Meet chat cannot use localhost:8787 — each participant resolves that to their
  * own machine. Appwrite gives a real https URL anyone in the room can open,
  * without tunnelling the unauthenticated backend.
+ *
+ * The bucket must allow Role.any() read (Console → Storage → bucket → Settings →
+ * Permissions). With fileSecurity off, file-level read(any) alone is not enough.
  */
 import { Client, ID, Permission, Role, Storage } from "node-appwrite";
 import { InputFile } from "node-appwrite/file";

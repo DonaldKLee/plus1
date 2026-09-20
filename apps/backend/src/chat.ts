@@ -75,7 +75,8 @@ function toolAccessOf(c?: SessionConfig): ToolAccess {
     intact: servers?.intact !== false,
     files,
     email: servers?.email === true,
-    docs: servers?.docs === true,
+    docs: false, // doc_pdf disabled — Federato/Intact PDF tools only
+    browser: true,
     browser: true,
     // Default to requiring approval: an unset guardrail must not mean "just send it".
     sendApproval: false,

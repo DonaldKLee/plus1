@@ -5,10 +5,11 @@
  * dashboard over SSE (see server.ts), updating live as each person speaks.
  *
  * The same session is also the plus1 on camera: a HeyGen LiveAvatar (packages/liveavatar) is
- * the tab's fake camera + mic, voiced by ElevenLabs (packages/voice). The brain (agentBrain.ts)
- * decides; the rig speaks. A room transcription fragment while the plus1 is talking interrupts
- * it (barge-in, HLD §5.5). The room audio tap skips the avatar's own playback elements
- * (data-plus1-avatar) so the plus1 never transcribes itself.
+ * the tab's fake camera + mic. Voice is ElevenLabs TTS (packages/voice) and/or OpenAI Realtime
+ * speech-to-speech, selected by TALK_BACKEND. The brain (agentBrain.ts) decides on the Gemini
+ * path; OpenAI Realtime decides on its path. A room transcription fragment while the plus1 is
+ * talking interrupts it (barge-in, HLD §5.5). The room audio tap skips the avatar's own playback
+ * elements (data-plus1-avatar) so the plus1 never transcribes itself.
  */
 
 import { randomUUID } from "node:crypto";
@@ -19,9 +20,10 @@ import { AvatarRig, LiveAvatarClient, type Emote } from "@plus1/liveavatar";
 import { FillerCache, voiceFromEnv, type ElevenLabsTts, type FillerKind } from "@plus1/voice";
 import { env, envOptional } from "./env.js";
 import { plus1Config } from "./plus1Config.js";
-import { emailPolicyFromConfig } from "./email.js";
-import { joinMeet, launchMeetChrome, stampWorkTitle, WORK_TAB_TITLE } from "./meetPresent.js";
+import { emailPolicyFromConfig, defaultRecipient } from "./email.js";
+import { joinMeet, launchMeetChrome, leaveMeetCall, listMeetParticipantNames, stampWorkTitle, WORK_TAB_TITLE } from "./meetPresent.js";
 import { onJevLiveView, startWorkBrowser, attachWorkBrowser } from "./jevAgent.js";
+import { onWorkHold, showWorkHold } from "./workHold.js";
 import { registerMeetingMedia, unregisterMeetingMedia } from "./browserWork.js";
 import {
   plus1_NAME,
@@ -44,6 +46,14 @@ import {
   setMeetingPurpose,
   storeEnabled,
 } from "./store.js";
+import {
+  OpenAIRealtimeSession,
+  realtimeInstructions,
+  realtimeToolsFor,
+  runRealtimeTool,
+  talkBackendOf,
+  type TalkBackend,
+} from "./openaiRealtime.js";
 
 /** Ignore transcription fragments this soon after the plus1 stopped: they're often its own tail. */
 const BARGE_IN_GUARD_MS = 400;
@@ -152,6 +162,13 @@ interface Session {
   memory: string[]; // standing instructions + facts to honor every turn
   state: MeetingState; // slot filling: active task, collected params, what's missing
   muted?: boolean; // chat-only mode: keep listening, but type instead of speak
+  /** Gemini Live + ElevenLabs, or OpenAI Realtime speech-to-speech. */
+  talkBackend?: TalkBackend;
+  openai?: OpenAIRealtimeSession;
+  /** Rebuild Realtime instructions when participant names refresh. */
+  openaiBuildInstructions?: (people: string[]) => string;
+  /** OpenAI agent line currently streaming into the transcript. */
+  openaiAgentLineId?: string;
 }
 
 /** Per-session plus1 configuration, sent from the dashboard on join. */
@@ -194,7 +211,7 @@ function toolAccessOf(s: Session): ToolAccess {
     intact: servers?.intact !== false,
     files,
     email: servers?.email === true,
-    docs: servers?.docs === true,
+    docs: false, // doc_pdf disabled — Federato/Intact PDF tools only
     browser: true,
     // Default to requiring approval: an unset guardrail must not mean "just send it".
     sendApproval: false,
@@ -267,6 +284,23 @@ async function closeContext(s: Session): Promise<void> {
   s.workLiveOff = undefined;
   if (s.gapTimer) clearTimeout(s.gapTimer);
   finalizeLine(s);
+
+  // Hang up Meet first so other participants see the plus1 leave — not just a
+  // frozen/dead LiveAvatar tile while Chrome stays in the call.
+  const meetPage = s.page;
+  if (meetPage && !meetPage.isClosed()) {
+    const leaveNotes: string[] = [];
+    try {
+      await Promise.race([
+        leaveMeetCall(meetPage, leaveNotes),
+        new Promise<boolean>((r) => setTimeout(() => r(false), 8_000)),
+      ]);
+    } catch (e) {
+      leaveNotes.push(`leave failed: ${(e as Error).message}`);
+    }
+    for (const msg of leaveNotes) note(s, msg);
+  }
+
   try {
     s.live?.close();
   } catch {
@@ -275,15 +309,24 @@ async function closeContext(s: Session): Promise<void> {
   s.live = undefined;
   s.liveReady = false;
 
+  try {
+    s.openai?.close();
+  } catch {
+    /* already closing */
+  }
+  s.openai = undefined;
+
   const rig = s.rig;
   s.rig = undefined;
-  if (rig) await rig.stop().catch(() => {});
+  if (rig) await Promise.race([rig.stop().catch(() => {}), new Promise((r) => setTimeout(r, 5_000))]);
 
+  s.page = undefined;
+  s.workPage = undefined;
   const ctx = s.context;
   s.context = undefined;
   if (!ctx) return;
   try {
-    await ctx.close();
+    await Promise.race([ctx.close(), new Promise((r) => setTimeout(r, 8_000))]);
   } catch {
     /* already gone */
   }
@@ -342,6 +385,7 @@ export async function getSession(id: string) {
       lines: s.lines,
       decisions: s.decisions,
       live: true,
+      talkBackend: s.talkBackend ?? talkBackendOf(),
     };
   }
   const doc = await getMeeting(id);
@@ -416,6 +460,7 @@ export function startMeetTranscription(
     config,
     memory: [],
     state: emptyState(),
+    talkBackend: talkBackendOf(),
   };
   session.bus.setMaxListeners(50);
   sessions.set(id, session);
@@ -476,8 +521,11 @@ async function runSession(s: Session): Promise<void> {
     const stored = (await getplus1Settings()) as SessionConfig | null;
     if (stored) {
       s.config = stored;
+      emailPolicyFromConfig(stored as Record<string, unknown>);
       note(s, `Loaded saved plus1 settings (name=${nameOf(s)}, autonomy=${autonomyOf(s)}).`);
     }
+  } else {
+    emailPolicyFromConfig(s.config as Record<string, unknown>);
   }
 
   const context = await launchMeetChrome({ purpose: "avatar" });
@@ -508,17 +556,24 @@ async function runSession(s: Session): Promise<void> {
 
   const page = await context.newPage();
   s.page = page;
+  // OpenAI Realtime owns the voice — do not wire ElevenLabs speak/filler into
+  // screenWatch, or the avatar will flip mid-call during browser_work.
+  const openaiTalk = (s.talkBackend ?? talkBackendOf()) === "openai";
   registerMeetingMedia(s.id, {
     meetPage: page,
     workPage,
     note: (msg) => note(s, msg),
-    speak: async (text) => {
-      await sayInRoom(s, text);
-    },
-    filler: async (kind) => {
-      await playFiller(s, kind);
-    },
-    busy: () => !!(s.rig?.isSpeaking || s.muted),
+    speak: openaiTalk
+      ? undefined
+      : async (text) => {
+          await sayInRoom(s, text);
+        },
+    filler: openaiTalk
+      ? undefined
+      : async (kind) => {
+          await playFiller(s, kind);
+        },
+    busy: () => !!(s.rig?.isSpeaking || s.muted || s.openai?.isSpeaking),
   });
 
   // The plus1's face and voice. Must be prepared BEFORE navigating: the (tiny) init script
@@ -537,9 +592,24 @@ async function runSession(s: Session): Promise<void> {
     return Array.prototype.push.apply(workNotes, items as string[]);
   }) as typeof workNotes.push;
   const initialTask = s.workTask?.trim();
-  const workP = initialTask
-    ? startWorkBrowser(workNotes, initialTask)
-    : attachWorkBrowser(workNotes);
+
+  // Pure fire-and-forget — nothing on the Meet/greet path ever awaits this.
+  void (async () => {
+    try {
+      note(s, "Browserbase: starting in background…");
+      const work = initialTask
+        ? await startWorkBrowser(workNotes, initialTask)
+        : await attachWorkBrowser(workNotes);
+      if (s.status === "ended" || s.status === "error") return;
+      s.workSessionId = work.sessionId;
+      note(s, `Opening work tab → ${work.liveViewUrl}`);
+      await workPage.goto(work.liveViewUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+      await stampWorkTitle(workPage);
+      note(s, `Work tab ready ("${WORK_TAB_TITLE}"). Will Present only when asked to share.`);
+    } catch (e) {
+      note(s, `Work browser: ${(e as Error).message}`);
+    }
+  })();
 
   s.workLiveOff = onJevLiveView((url, sessionId) => {
     if (s.status === "ended" || s.status === "error") return;
@@ -550,48 +620,299 @@ async function runSession(s: Session): Promise<void> {
       .then(() => stampWorkTitle(workPage))
       .catch((e) => note(s, `live-view reload: ${(e as Error).message}`));
   });
+  const holdOff = onWorkHold(() => {
+    if (s.status === "ended" || s.status === "error") return;
+    void showWorkHold(workPage, (msg) => note(s, msg));
+  });
+  const prevClose = s.workLiveOff;
+  s.workLiveOff = () => {
+    prevClose?.();
+    holdOff();
+  };
 
-  // Start the avatar while the prejoin screen is up so the camera preview already shows it.
+  // Avatar + Realtime in parallel with join — do NOT await them before listening.
   const avatarUp = rig
     ? rig.start().then(() => note(s, "Avatar is live on the camera.")).catch((e) => note(s, `Avatar failed to start: ${(e as Error).message}`))
     : Promise.resolve();
+  void avatarUp;
+
+  s.talkBackend = talkBackendOf();
+  if (s.talkBackend === "openai") {
+    void connectOpenAIRealtime(s);
+  }
 
   const joined = await joinMeet(page, s.notes, { muted: false, camera: rig ? "on" : "off", displayName: `${nameOf(s)} (plus1 AI)` });
   if (!joined) {
     setStatus(s, "error", s.notes[s.notes.length - 1] ?? "Could not join the meeting.");
-    await closeContext(s); // quit the Chrome window if we couldn't get in
+    await closeContext(s);
     return;
   }
   note(s, "Joined the meeting.");
-  await avatarUp;
-  // Meet reloads the tab after sign-in and on some errors; re-plumb the avatar when that happens.
   page.on("load", () => void rig?.reattach());
-
-  try {
-    const work = await Promise.race([
-      workP,
-      new Promise<null>((r) => setTimeout(() => r(null), 25_000)),
-    ]);
-    if (work) {
-      s.workSessionId = work.sessionId;
-      note(s, `Opening work tab → ${work.liveViewUrl}`);
-      await workPage.goto(work.liveViewUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
-    } else {
-      note(s, "Work browser still starting — Present waits until Shannon is asked to share.");
-    }
-  } catch (e) {
-    note(s, `Work browser: ${(e as Error).message}`);
-  }
-
-  await stampWorkTitle(workPage);
-  await page.bringToFront().catch(() => undefined);
-  note(s, `Work tab ready ("${WORK_TAB_TITLE}"). Will Present only when asked to share.`);
 
   s.startedAt = Date.now();
   if (!rig) note(s, "No LIVEAVATAR_API_KEY — the plus1 can chat and use tools, but has no face or voice.");
-  openLive(s);
+
+  // Greet as soon as we're in — greetOpenAIAfterJoin waits on Realtime/avatar itself.
+  if (s.talkBackend === "openai") {
+    if (s.openai) void greetOpenAIAfterJoin(s);
+    else openOpenAIRealtime(s);
+  } else if (!s.live) {
+    openLive(s);
+  }
   await startAudioCapture(page, s);
   setStatus(s, "listening");
+}
+
+// ── OpenAI Realtime: speech-to-speech (TALK_BACKEND=openai) ────────────────
+
+function openOpenAIRealtime(s: Session): void {
+  void connectOpenAIRealtime(s).then(() => {
+    if (s.openai && s.talkBackend === "openai") void greetOpenAIAfterJoin(s);
+  });
+}
+
+/** Connect the Realtime WS (safe to call on the prejoin screen). No greeting yet. */
+async function connectOpenAIRealtime(s: Session): Promise<void> {
+  const key = envOptional("OPENAI_API_KEY");
+  if (!key) {
+    note(s, "TALK_BACKEND=openai but OPENAI_API_KEY is unset — using Gemini Live + ElevenLabs.");
+    s.talkBackend = "legacy";
+    openLive(s);
+    return;
+  }
+  if (!s.rig) {
+    note(s, "OpenAI Realtime needs LiveAvatar for voice output — using Gemini Live + ElevenLabs.");
+    s.talkBackend = "legacy";
+    openLive(s);
+    return;
+  }
+  if (s.openai) return;
+
+  const name = nameOf(s);
+  emailPolicyFromConfig(s.config as Record<string, unknown>);
+  const defaultEmailTo = defaultRecipient() ?? s.config?.email?.defaultTo;
+  const access = toolAccessOf(s);
+
+  const buildInstructions = (people: string[]) =>
+    realtimeInstructions({
+      name,
+      purpose: s.purpose,
+      memory: s.memory,
+      muted: s.muted,
+      access: toolAccessOf(s),
+      participants: people,
+      defaultEmailTo,
+    });
+
+  // Stash builder for post-join greet / name refreshes.
+  s.openaiBuildInstructions = buildInstructions;
+
+  const session = new OpenAIRealtimeSession({
+    apiKey: key,
+    model: envOptional("OPENAI_REALTIME_MODEL") ?? "gpt-realtime-2.1",
+    voice: envOptional("OPENAI_REALTIME_VOICE") ?? "coral",
+    name,
+    instructions: buildInstructions([]),
+    tools: realtimeToolsFor(access),
+    greetOnReady: false,
+    handlers: {
+      onNote: (msg) => note(s, msg),
+      onUserTranscript: (text, partial) => upsertUserTranscript(s, text, partial),
+      onAgentTranscript: (text, partial) => upsertAgentTranscript(s, text, partial),
+      onSpeakStart: (queue, label) => {
+        if (!s.rig || s.muted) {
+          queue.close();
+          return { interrupt: () => undefined, done: Promise.resolve() };
+        }
+        const rig = s.rig;
+        let current: { interrupt: () => void; done?: Promise<unknown> } | undefined;
+        let cancelled = false;
+        const done = (async () => {
+          const ready = await rig.waitUntilReady(18_000);
+          if (cancelled) {
+            queue.close();
+            return;
+          }
+          if (!ready) {
+            queue.close();
+            note(s, "OpenAI audio dropped — avatar never became ready");
+            return;
+          }
+          try {
+            const u = rig.speakPcm(queue, { label: label ?? "openai" });
+            current = { interrupt: () => u.interrupt(), done: u.done };
+            await u.done;
+          } catch (e) {
+            queue.close();
+            note(s, `OpenAI audio dropped: ${(e as Error).message}`);
+          }
+        })();
+        return {
+          interrupt: () => {
+            cancelled = true;
+            current?.interrupt();
+            queue.close();
+          },
+          done,
+        };
+      },
+      onSpeakEnd: () => {
+        s.lastSpeechEndedAt = Date.now();
+      },
+      onBargeIn: () => {
+        s.rig?.interrupt();
+        note(s, "Barge-in: human cut the plus1 off.");
+      },
+      onDecision: (d) => {
+        const record: DecisionRecord = {
+          act: true,
+          action: d.action,
+          confidence: 1,
+          reason: d.reason,
+          say: d.say,
+          tool: d.tool,
+          id: randomUUID(),
+          t: s.startedAt ? Date.now() - s.startedAt : 0,
+          at: new Date().toISOString(),
+          outcome: d.outcome ?? "acting",
+        };
+        s.decisions.push(record);
+        emit(s, "decision", record);
+        persist(s);
+      },
+      onToolCall: (toolName, args) => runRealtimeTool(toolName, args, toolAccessOf(s), s.id),
+      onShareUrl: async (url) => {
+        if (!s.page) return;
+        const ok = await postToMeetChat(s.page, url);
+        note(s, ok ? "Posted share link to Meet chat." : "Meet chat post failed for share link.");
+      },
+    },
+  });
+  s.openai = session;
+  session.connect();
+  note(s, "Talk backend: OpenAI Realtime connecting (parallel with Meet join)…");
+  // Do not await ready here — that was serializing join → ready → greet and
+  // felt like "waiting for Browserbase". greetOpenAIAfterJoin waits itself.
+  void session.waitUntilReady(15_000).then((ok) => {
+    note(s, ok ? "OpenAI Realtime ready." : "OpenAI Realtime still connecting — will greet when ready.");
+  });
+}
+
+/** After Meet join: scrape People DOM, then greet. */
+async function greetOpenAIAfterJoin(s: Session): Promise<void> {
+  const session = s.openai;
+  if (!session || s.talkBackend !== "openai") return;
+  const name = nameOf(s);
+  const exclude = [name, "plus1"];
+  const build =
+    s.openaiBuildInstructions ??
+    ((people: string[]) =>
+      realtimeInstructions({
+        name,
+        purpose: s.purpose,
+        memory: s.memory,
+        muted: s.muted,
+        access: toolAccessOf(s),
+        participants: people,
+        defaultEmailTo: defaultRecipient() ?? s.config?.email?.defaultTo,
+      }));
+
+  let people: string[] = [];
+  if (s.page) {
+    // One quick scrape — do not sit idle waiting for a People panel that we
+    // refuse to open. Later refreshes still update instructions.
+    people = await listMeetParticipantNames(s.page, { exclude });
+  }
+
+  const ok = await session.waitUntilReady(8_000);
+  if (!ok || s.status === "ended" || s.status === "error") {
+    note(s, "Skipped greeting — OpenAI Realtime not ready.");
+    return;
+  }
+  if (s.rig) {
+    const st = s.rig.sessionState;
+    if (st !== "ready" && st !== "speaking") await s.rig.waitUntilReady(6_000);
+  }
+  if (!s.openai || s.status === "ended" || s.status === "error") return;
+
+  s.openai.updateInstructions(build(people));
+  if (people.length) note(s, `Participants: ${people.join(", ")}`);
+  else note(s, "Participants: none in Meet DOM yet — greeting the room.");
+  s.openai.requestGreeting({ participants: people });
+
+  for (const delay of [2_000, 6_000, 12_000]) {
+    setTimeout(() => {
+      if (!s.page || s.status === "ended" || s.status === "error" || !s.openai) return;
+      void listMeetParticipantNames(s.page, { exclude }).then((next) => {
+        if (!s.openai || !next.length) return;
+        s.openai.updateInstructions(build(next));
+        note(s, `Participants: ${next.join(", ")}`);
+      });
+    }, delay);
+  }
+}
+
+/** Room transcript from OpenAI input transcription. */
+function upsertUserTranscript(s: Session, text: string, partial: boolean): void {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+
+  // Realtime already barges via speech_started (with a cooldown). Don't also
+  // cut from transcript fragments — that double-fired mid-sentence cutoffs.
+  if (s.talkBackend !== "openai") {
+    if (s.rig?.isSpeaking && Date.now() - s.lastSpeechEndedAt > BARGE_IN_GUARD_MS) {
+      s.rig.interrupt();
+    }
+  }
+
+  let line = s.currentLineId ? s.lines.find((l) => l.id === s.currentLineId) : undefined;
+  if (!line || line.agent) {
+    line = {
+      id: randomUUID(),
+      t: s.startedAt ? Date.now() - s.startedAt : 0,
+      at: new Date().toISOString(),
+      text: "",
+      partial: true,
+    };
+    s.currentLineId = line.id;
+    s.lines.push(line);
+  }
+  line.text = trimmed;
+  line.partial = partial;
+  emit(s, "line", line);
+  if (!partial) {
+    s.currentLineId = undefined;
+    persist(s);
+  }
+}
+
+/** Plus1 transcript from OpenAI output audio transcript. */
+function upsertAgentTranscript(s: Session, text: string, partial: boolean): void {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  let line = s.openaiAgentLineId ? s.lines.find((l) => l.id === s.openaiAgentLineId) : undefined;
+  if (!line) {
+    line = {
+      id: randomUUID(),
+      t: s.startedAt ? Date.now() - s.startedAt : 0,
+      at: new Date().toISOString(),
+      text: trimmed,
+      partial: true,
+      agent: true,
+      speaker: nameOf(s),
+    };
+    s.openaiAgentLineId = line.id;
+    s.lines.push(line);
+  } else {
+    line.text = trimmed;
+    line.partial = partial;
+  }
+  emit(s, "line", line);
+  if (!partial) {
+    s.openaiAgentLineId = undefined;
+    persist(s);
+  }
 }
 
 // ── Gemini Live: one WebSocket per session, streamed continuously ──────────
@@ -665,6 +986,7 @@ function appendFragment(s: Session, frag: string): void {
   // Barge-in: a human is talking while the plus1 speaks → cut the plus1 off (mechanical, no decision).
   if (s.rig?.isSpeaking && Date.now() - s.lastSpeechEndedAt > BARGE_IN_GUARD_MS && frag.trim()) {
     s.rig.interrupt();
+    s.openai?.bargeIn();
     note(s, `Barge-in: someone spoke over the plus1 ("${frag.trim().slice(0, 40)}").`);
   }
 
@@ -708,6 +1030,8 @@ function finalizeLine(s: Session): void {
 // ── Brain: decide + act on the settled transcript ──────────────────────────
 
 function scheduleBrain(s: Session, delayMs = BRAIN_DEBOUNCE_MS): void {
+  // OpenAI Realtime owns turn-taking + speech; do not run the Gemini HTTP brain.
+  if (s.talkBackend === "openai") return;
   if (s.brainTimer) clearTimeout(s.brainTimer);
   s.brainTimer = setTimeout(() => void runBrain(s), delayMs);
 }
@@ -801,6 +1125,8 @@ function transcriptWindow(s: Session, maxLines = 14): string {
 
 async function runBrain(s: Session): Promise<void> {
   if (s.status !== "listening") return;
+  // OpenAI Realtime owns turn-taking + speech on that path.
+  if (s.talkBackend === "openai") return;
   // Busy or mid-sentence: come back to it rather than dropping the turn. Barge-in
   // cuts the speech off if a human wants the floor, and then this fires.
   if (s.brainBusy || s.rig?.isSpeaking) {
@@ -1018,6 +1344,12 @@ async function sayInRoom(s: Session, text: string): Promise<SaidResult> {
   if (!line) return { delivered: false, outcome: "nothing to say" };
   const page = s.page;
 
+  // Realtime owns PCM + coral voice. Never call ElevenLabs `rig.say` here or the
+  // avatar switches voices mid-meeting (screenWatch glances used to do this).
+  if (s.talkBackend === "openai") {
+    return { delivered: false, outcome: "openai owns voice; skipped elevenlabs" };
+  }
+
   if (s.rig && !s.muted) {
     try {
       // say() rides out a session dying mid-sentence: it waits for the fresh
@@ -1050,11 +1382,13 @@ async function sayInRoom(s: Session, text: string): Promise<SaidResult> {
 
 /** Play a cached filler so a slow tool doesn't leave dead air. Never throws. */
 function startFiller(s: Session): Promise<void> | undefined {
+  if (s.talkBackend === "openai") return undefined;
   if (!s.rig || s.muted || !s.fillers) return undefined;
   return playFiller(s, "checking");
 }
 
 async function playFiller(s: Session, kind: FillerKind): Promise<void> {
+  if (s.talkBackend === "openai") return;
   if (!s.rig || s.muted) return;
   const f = s.fillers?.pick(kind) ?? s.fillers?.pick("thinking") ?? s.fillers?.pick("ack");
   if (!f) return;
@@ -1082,9 +1416,13 @@ async function prepareAvatar(s: Session, page: Page): Promise<AvatarRig | undefi
   try {
     tts = voiceFromEnv();
     s.tts = tts;
-    s.fillers = new FillerCache({ tts, voiceKey: `${tts.voiceId}:${tts.model}` });
-    const warmed = await s.fillers.warm();
-    note(s, `Voice ready (${warmed.loaded} fillers cached, ${warmed.synthesized} synthesized).`);
+    if (talkBackendOf() !== "openai") {
+      s.fillers = new FillerCache({ tts, voiceKey: `${tts.voiceId}:${tts.model}` });
+      const warmed = await s.fillers.warm();
+      note(s, `Voice ready (${warmed.loaded} fillers cached, ${warmed.synthesized} synthesized).`);
+    } else {
+      note(s, "Voice ready (OpenAI Realtime PCM → LiveAvatar).");
+    }
   } catch (e) {
     note(s, `ElevenLabs not configured (${(e as Error).message}); the plus1 has a face but no voice.`);
   }
@@ -1159,6 +1497,7 @@ export function speakInSession(id: string, text: string): { id: string } {
 /** Instant cached filler while the planner (or the operator) thinks. */
 export function fillerInSession(id: string, kind: FillerKind = "ack"): { id: string; phrase: string } | null {
   const { s, rig } = requireRig(id);
+  if (s.talkBackend === "openai") return null;
   const f = s.fillers?.pick(kind);
   if (!f) return null;
   const u = rig.speakPcm(f.pcm, { label: f.phrase });
@@ -1167,7 +1506,9 @@ export function fillerInSession(id: string, kind: FillerKind = "ack"): { id: str
 }
 
 export function interruptSession(id: string): void {
-  requireRig(id).rig.interrupt();
+  const { s, rig } = requireRig(id);
+  rig.interrupt();
+  s.openai?.bargeIn();
 }
 
 export async function honkSession(id: string): Promise<void> {
@@ -1194,6 +1535,10 @@ async function startAudioCapture(page: Page, s: Session): Promise<void> {
         s,
         `Tapped ${taps} audio stream${taps === 1 ? "" : "s"} in the room${taps <= 1 ? " — treating as a 1:1, will respond directly." : "."}`,
       );
+    }
+    if (s.talkBackend === "openai" && s.openai) {
+      s.openai.appendMeetPcm16kBase64(b64);
+      return;
     }
     const ws = s.live;
     if (ws && ws.readyState === 1 && s.liveReady) {

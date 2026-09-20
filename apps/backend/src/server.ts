@@ -1,7 +1,9 @@
 import "./plus1Config.js"; // load committed plus1 config + hydrate env before anything reads it
 import express from "express";
 import cors from "cors";
+import fs from "node:fs";
 import { envOptional } from "./env.js";
+import { workHoldHtml, workHoldLogoPath } from "./workHold.js";
 import { cacheSchemaAndPolicies } from "./federatoClient.js";
 import { rankQueue } from "./rank.js";
 import { agenticQuery } from "./federatoQuery.js";
@@ -81,6 +83,21 @@ app.use(express.json());
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "backend", store: storeEnabled() ? "mongodb" : "memory" });
+});
+
+/** Logo interstitial shown in the Present work tab between Browserbase agent runs. */
+app.get("/work-hold", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.type("html").send(workHoldHtml());
+});
+app.get("/work-hold/logo.png", (_req, res) => {
+  const p = workHoldLogoPath();
+  if (!fs.existsSync(p)) {
+    res.status(404).end();
+    return;
+  }
+  res.setHeader("Cache-Control", "no-store");
+  res.type("png").send(fs.readFileSync(p));
 });
 
 app.post("/api/federato/cache", async (_req, res) => {

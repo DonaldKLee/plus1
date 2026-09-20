@@ -38,8 +38,8 @@ const DEFAULT_CONFIG: Config = {
   honk: true,
   monologueMin: 3,
   guardrails: { sendApproval: false, noComp: true, noDeadlines: false },
-  // Documents are harmless (a PDF in memory); email leaves the building.
-  servers: { federato: true, intact: true, local: false, docs: true, email: true },
+  // docs/doc_pdf off — quotes & indications use Federato/Intact PDF tools.
+  servers: { federato: true, intact: true, local: false, docs: false, email: true },
   localAccess: "read",
   email: { allowlist: "", defaultTo: "" },
 };

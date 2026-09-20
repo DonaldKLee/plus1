@@ -89,15 +89,49 @@ async function findPolicyId(query: string): Promise<{ id: number | null; how: st
     if (byPolicy) return { id: byPolicy.policyId, how: `matched ${numMatch[1]} to ${who(byPolicy)}` };
     return { id: n, how: `treating ${n} as a policy id` };
   }
-  const q = query.toLowerCase();
-  const words = q.split(/\s+/).filter((w) => w.length > 2 && !["the", "and", "account", "policy", "for", "about", "check", "look", "into", "what", "with"].includes(w));
+  const q = query.toLowerCase().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
+  if (!q) return { id: null, how: "empty account query" };
+
+  // Prefer a contiguous name match (stops "Harbor Point" → random "…Point…" / Verdant).
+  const byPhrase = ranked
+    .map((r) => {
+      const name = who(r).toLowerCase();
+      if (name.includes(q) || q.includes(name)) return { r, score: 100 + Math.min(name.length, q.length) };
+      return null;
+    })
+    .filter(Boolean) as { r: (typeof ranked)[number]; score: number }[];
+  if (byPhrase.length) {
+    byPhrase.sort((a, b) => b.score - a.score);
+    return { id: byPhrase[0]!.r.policyId, how: `phrase-matched "${query}" to ${who(byPhrase[0]!.r)}` };
+  }
+
+  const stop = new Set(["the", "and", "account", "policy", "for", "about", "check", "look", "into", "what", "with", "pdf", "quote", "indication", "send", "email", "please", "pull", "up"]);
+  const words = q.split(/\s+/).filter((w) => w.length > 2 && !stop.has(w));
+  if (!words.length) return { id: null, how: `no usable tokens in "${query}"` };
+
   const scored = ranked
-    .map((r) => ({ r, hits: words.filter((w) => who(r).toLowerCase().includes(w)).length }))
+    .map((r) => {
+      const name = who(r).toLowerCase();
+      const hits = words.filter((w) => name.includes(w)).length;
+      return { r, hits, name };
+    })
     .filter((x) => x.hits > 0)
-    .sort((a, b) => b.hits - a.hits);
+    .sort((a, b) => b.hits - a.hits || b.name.length - a.name.length);
+
   const best = scored[0];
   if (!best) return { id: null, how: `no account name in the queue matched "${query}"` };
-  return { id: best.r.policyId, how: `matched "${query}" to ${who(best.r)}` };
+  // Multi-word queries need at least 2 token hits (Harbor + Point), not a weak single hit.
+  if (words.length >= 2 && best.hits < 2) {
+    return { id: null, how: `ambiguous match for "${query}" (best was ${who(best.r)} with ${best.hits} token hit)` };
+  }
+  // Tie-break: if #2 has same hits, refuse rather than guess Verdant.
+  if (scored[1] && scored[1].hits === best.hits) {
+    return {
+      id: null,
+      how: `ambiguous: "${query}" matches ${who(best.r)} and ${who(scored[1].r)} equally — ask which account`,
+    };
+  }
+  return { id: best.r.policyId, how: `matched "${query}" to ${who(best.r)} (${best.hits}/${words.length} tokens)` };
 }
 
 async function account(query?: string): Promise<FederatoToolResult> {
@@ -299,5 +333,5 @@ export const FEDERATO_TOOL_DOCS: { name: string; doc: string }[] = [
   { name: "federato_portfolio", doc: `federato_portfolio(dimension) — where the book is already exposed, for portfolio context: by "state", "hazard", "construction", "broker", "decision" or "business type" — policies, TIV, premium and share of the book per bucket. Use for "are we already heavy in Florida / flood / frame", "which broker sends us the most".` },
   { name: "federato_enrich", doc: `federato_enrich(query) — pull OUTSIDE risk data for one account's primary location: FEMA disaster declarations for the county since 2015, NFIP flood claims in the zip, and last year's worst gust and wettest day (OpenFEMA + Open-Meteo, live), scored as extra appetite factors, and whether that changes the decision. Use when someone asks about flood/hurricane/cat exposure or "what does the outside data say".` },
   { name: "federato_guidelines", doc: `federato_guidelines(topic?) — quote the 2025 commercial property appetite table (or one factor, e.g. "premium", "construction") or define an underwriting term ("TIV", "appetite", "refer"). Use when someone asks what the rules are or what a term means.` },
-  { name: "federato_quote_pdf", doc: `federato_quote_pdf(query) — render a one-page commercial property INDICATION from the live Federato file. The masthead says Federato, never Intact. Use when the room is on a commercial account (Harbor Point, a policy number, the UW queue) and they want a quote PDF / indication / write-up. tool.query is the account name or policy number. NEVER use this for a personal Intact car/tenant quote. The public Appwrite link is posted into Meet chat automatically — NEVER read the URL aloud.` },
+  { name: "federato_quote_pdf", doc: `federato_quote_pdf(query) — render a one-page commercial property INDICATION from the live Federato file. tool.query = exact account name or policy number. The public link is posted into Meet chat automatically — NEVER read the URL aloud. When this tool returns, the PDF is DONE (never say "still generating"). Email ONLY if they asked to email/mail it — then call email_send with attachPdf:"last". Default for "send me the report/indication" is chat, not email.` },
 ];

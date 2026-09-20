@@ -29,6 +29,9 @@ import {
 } from "./meetTranscribe.js";
 import { createChat, getChat, sendChatMessage, updateChatConfig } from "./chat.js";
 import { getQuotePdf } from "./intactPdf.js";
+import { loadDoc } from "./docPdf.js";
+import { emailStatus, verifyEmail } from "./email.js";
+import { startPublicDocs } from "./publicDocs.js";
 import {
   deleteMeeting,
   getplus1Settings,
@@ -341,6 +344,32 @@ app.get("/api/intact/quote/:id.pdf", (req, res) => {
   res.send(Buffer.from(bytes));
 });
 
+// Serve a generated PDF document. Falls back to Mongo, so a link handed out
+// before a restart still resolves.
+app.get("/api/doc/:id.pdf", async (req, res) => {
+  const doc = await loadDoc(String(req.params.id)).catch(() => undefined);
+  if (!doc) {
+    res.status(404).json({ error: "document expired or not found" });
+    return;
+  }
+  res.setHeader("content-type", "application/pdf");
+  res.setHeader("content-disposition", `inline; filename="${doc.filename}"`);
+  res.send(Buffer.from(doc.bytes));
+});
+
+// Is email actually wired up? The plus1 tab uses this to show a live badge, so
+// nobody discovers mid-demo that sends were dry runs all along.
+app.get("/api/email/status", async (req, res) => {
+  const status = emailStatus();
+  // ?verify=1 opens a real SMTP connection; skip it on a plain poll.
+  if (status.configured && req.query.verify === "1") {
+    const check = await verifyEmail();
+    res.json({ ...status, verified: check.ok, error: check.error });
+    return;
+  }
+  res.json(status);
+});
+
 app.post("/api/chat/sessions", (req, res) => {
   const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : undefined;
   res.json(createChat(config));
@@ -387,4 +416,7 @@ app.post("/api/meet/sessions/:id/leave", async (req, res) => {
 const port = Number(process.env.PORT ?? 8787);
 app.listen(port, () => {
   console.log(`backend listening on http://localhost:${port}`);
+  // The public document server is a separate app on a separate port, so only it
+  // ever sits behind the tunnel. Off unless PUBLIC_DOCS=1.
+  startPublicDocs({ mainPort: port });
 });

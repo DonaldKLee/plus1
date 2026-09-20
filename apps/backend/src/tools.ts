@@ -8,6 +8,8 @@ import { runFileTool, READ_TOOLS, WRITE_TOOLS, type FileTool } from "./fileTools
 import { runCommand } from "./shellTools.js";
 import { runFederatoTool } from "./federatoTools.js";
 import { runIntactTool, type NextStep } from "./intactTools.js";
+import { runEmailTool } from "./emailTools.js";
+import { runDocTool } from "./docTools.js";
 import type { QuoteResult } from "@plus1/brain";
 
 export type ToolCall = NonNullable<Decision["tool"]>;
@@ -20,12 +22,20 @@ export interface ToolResult {
   nextStep?: NextStep;
   /** Reasoning trace for the operator: which queries ran, which sources answered. */
   trace?: string[];
+  /** An email was drafted and is waiting on a human's yes (sendApproval). */
+  pendingApproval?: boolean;
+  /** A publicly reachable link, when public sharing is configured. */
+  shareUrl?: string;
 }
 
 const t = (text: string): ToolResult => ({ text });
 
 /** Run one tool call, gated by the session's access. */
-export async function executeTool(call: ToolCall, access: ToolAccess): Promise<ToolResult> {
+export async function executeTool(
+  call: ToolCall,
+  access: ToolAccess,
+  opts?: { meetingId?: string },
+): Promise<ToolResult> {
   const name = call.name;
 
   if (name.startsWith("federato_")) {
@@ -40,6 +50,35 @@ export async function executeTool(call: ToolCall, access: ToolAccess): Promise<T
     return runIntactTool(name, { query: call.query, details: call.details })
       .then((r) => ({ text: r.text, quote: r.quote, pdfUrl: r.pdfUrl, nextStep: r.nextStep }))
       .catch((e: Error) => t(`Intact error: ${e.message}`));
+  }
+
+  if (name.startsWith("doc_")) {
+    if (!access.docs) return t("document generation is turned off right now.");
+    return runDocTool(name, {
+      query: call.query,
+      content: call.content,
+      details: call.details,
+      meetingId: opts?.meetingId,
+    })
+      .then((r) => ({ text: r.text, pdfUrl: r.pdfUrl, shareUrl: r.shareUrl }))
+      .catch((e: Error) => t(`pdf error: ${e.message}`));
+  }
+
+  if (name.startsWith("email_")) {
+    if (!access.email) return t("email isn't connected right now.");
+    return runEmailTool(
+      name,
+      { query: call.query, content: call.content, details: call.details },
+      // guardrails.sendApproval → preview + confirm instead of sending outright.
+      { requireApproval: access.sendApproval !== false },
+    )
+      .then((r) => ({
+        text: r.text,
+        pdfUrl: r.pdfUrl,
+        shareUrl: r.shareUrl,
+        pendingApproval: r.pendingApproval,
+      }))
+      .catch((e: Error) => t(`email error: ${e.message}`));
   }
 
   if (name === "run_command") {
@@ -84,6 +123,8 @@ export interface ChainContext {
   memory: string[];
   muted?: boolean;
   state: MeetingState;
+  /** Meeting this chain belongs to, when there is one (doc tools attach to it). */
+  meetingId?: string;
 }
 
 export interface ChainHooks {
@@ -112,7 +153,7 @@ export async function runToolChain(first: ToolCall, access: ToolAccess, ctx: Cha
     const args = argsOf(call);
     let result: ToolResult;
     try {
-      result = await executeTool(call, access);
+      result = await executeTool(call, access, { meetingId: ctx.meetingId });
     } catch (e) {
       result = { text: `the ${call.name} tool failed: ${(e as Error).message}` };
     }

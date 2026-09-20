@@ -12,7 +12,7 @@ import {
 
 /* --------------------------------------------------------------- model ---- */
 
-type ServerId = "federato" | "intact" | "local";
+type ServerId = "federato" | "intact" | "local" | "docs" | "email";
 type AccessLevel = "read" | "write";
 
 interface Config {
@@ -35,7 +35,9 @@ const DEFAULT_CONFIG: Config = {
   honk: true,
   monologueMin: 3,
   guardrails: { sendApproval: true, noComp: true, noDeadlines: false },
-  servers: { federato: true, intact: false, local: false },
+  // Documents are harmless (a PDF in memory); email leaves the building, so it
+  // starts off and stays behind the sendApproval guardrail.
+  servers: { federato: true, intact: false, local: false, docs: true, email: false },
   localAccess: "read",
 };
 
@@ -84,6 +86,19 @@ const SERVERS: { id: ServerId; name: string; monogram: string; summary: string }
     name: "Local access",
     monogram: "L",
     summary: "Read and write files on this machine, scoped to the working directory.",
+  },
+  {
+    id: "docs",
+    name: "Documents",
+    monogram: "D",
+    summary: "Write meeting notes, recaps and action items into a real PDF you can download or have emailed.",
+  },
+  {
+    id: "email",
+    name: "Email",
+    monogram: "E",
+    summary:
+      "Send email over SMTP, with a generated PDF attached. Needs GMAIL_USER + GMAIL_APP_PASSWORD (or the SMTP_* vars) in .env — without them the plus1 drafts but nothing goes out.",
   },
 ];
 

@@ -95,6 +95,77 @@ elements marked `data-plus1-avatar` so the plus1 doesn't transcribe itself. `LIV
 sessions die after ~60 s (auto-restarted, video freezes briefly); use `0` for real demos.
 Read `packages/liveavatar/README.md` before touching the media path.
 
+## Documents + email (PDF out, SMTP out)
+
+Two more tool families, same in-process pattern as the Intact toolset (prefix-routed in
+`tools.ts`, gated by a `servers.*` toggle in the plus1 tab). Note the naming: like the "Intact
+MCP", these are **not** MCP-protocol servers — there is no MCP client or server anywhere in this
+repo. They're tool modules the brain calls directly.
+
+- **`doc_pdf`** (`servers.docs`, on by default) — `apps/backend/src/docTools.ts` →
+  `docPdf.ts`. Renders markdown-lite (headings, bullets, numbered lists, rules, blockquotes) into
+  a paginated PDF with `pdf-lib`. The plus1 writes the content itself from the meeting; it doesn't
+  ask anyone to dictate it. Stored in memory under a uuid with a 1-hour TTL and served at
+  `GET /api/doc/:id.pdf` — the same contract `intactPdf.ts` uses for quotes, so nothing hits disk.
+  Deliberately **not** headless-Chromium HTML→PDF: the only Chrome here is the headed,
+  SingletonLock'd profile that joins Meet, and borrowing it mid-meeting would fight the live
+  session.
+- **`email_send` / `email_status`** (`servers.email`, **off** by default) —
+  `apps/backend/src/emailTools.ts` → `email.ts`, nodemailer over SMTP.
+  `details.attachPdf: "last"` attaches the PDF just generated (resolves against both the document
+  and quote stores), so "email me those notes" works in one turn without the model having to carry
+  a uuid.
+
+**Email safety — don't loosen this casually.** The composer is an LLM reacting to a live,
+frequently misheard transcript, and an email can't be unsent. So: sending is a **dry run** unless
+SMTP is configured (it still drafts and logs); `EMAIL_ALLOWLIST` gates recipients by address or
+domain; recipients are capped (`EMAIL_MAX_RECIPIENTS`, default 5); and the **`sendApproval`
+guardrail makes it two-step** — the first `email_send` returns the exact draft and sends nothing,
+and only a second call carrying `details.confirm = true` (after a human says yes) delivers. That
+guardrail defaults to ON, and an *unset* guardrail is treated as ON in all three `toolAccessOf`
+mappings.
+
+**Why SMTP and not the Gmail API:** there is no Google OAuth in this repo. The only Google
+credential is the hand-signed-in persistent Chrome profile Playwright drives (`meetPresent.ts`) —
+a browser session, not a token, and not exchangeable for one. An app password needs no consent
+screen or callback URL. `deliver()` in `email.ts` is the single seam to swap if that changes.
+
+Config: `GMAIL_USER` + `GMAIL_APP_PASSWORD`, or the `SMTP_*` vars. See `.env.example`.
+
+### Share links (PDF → Meet chat)
+
+Generated PDFs are mirrored into Atlas (`documents` collection, `docStore.ts`) keyed by a
+192-bit share token, with a **TTL index on `expiresAt`** so Mongo expires them itself. A plain
+`Binary` field, not GridFS — these are KB, nowhere near the 16MB BSON limit. `loadDoc()` in
+`docPdf.ts` checks memory first and falls back to Mongo, so a link handed out before a restart
+still resolves.
+
+Reachability is a *separate* problem from storage: `localhost:8787` in a Meet chat resolves to each
+participant's own machine. So there's a second, deliberately tiny Express app —
+`publicDocs.ts`, on `PUBLIC_DOCS_PORT` (8788) — that serves **only** `GET /d/:token`. That is the
+port the tunnel exposes.
+
+> **Never point the tunnel at 8787.** The main backend has no auth on any route: `/api/meet/join`
+> launches Chrome and joins a meeting as you, `/api/plus1/config` rewrites the agent's config, and
+> the chat endpoints reach the agent's file and `run_command` tools. Tunnelling it publishes all of
+> that. The 8788 app has one GET route, no body parser, and no agent surface.
+
+```bash
+brew install cloudflared
+# PUBLIC_DOCS=1 in .env, restart the backend
+npm run tunnel      # writes cache/public-url.txt; the backend reads it automatically
+```
+
+`publicBaseUrl()` resolves `PUBLIC_BASE_URL` → `cache/public-url.txt` → undefined. When it's
+undefined no `shareUrl` is produced and PDFs stay download-only, so the feature degrades cleanly.
+When it is set, `doc_pdf` returns a `shareUrl`, `meetTranscribe.ts` posts it into the Meet chat
+verbatim (the `doc_pdf` tool doc forbids reading a URL aloud), and the dashboard shows a "Copy
+share link" button.
+
+**A share link is a bearer credential** — anyone holding it reads the document, no login. That's
+the tradeoff for pasting into a meeting chat. Keep `PUBLIC_DOC_TTL_HOURS` short, and note a quick
+tunnel's hostname changes on every run.
+
 ## Running it
 
 ```bash

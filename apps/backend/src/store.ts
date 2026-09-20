@@ -157,6 +157,22 @@ async function backfillPreviews(col: Collection<MeetingDoc>): Promise<void> {
   }
 }
 
+/**
+ * The shared database handle, for sibling modules that persist their own
+ * collections (docStore.ts). Deliberately exported instead of letting each
+ * module build its own client — one MongoClient per process, one connection
+ * pool, one place that knows the URI. Returns null when unconfigured, so
+ * callers degrade to no-ops the same way this module does.
+ */
+export async function sharedDb(): Promise<Db | null> {
+  try {
+    return await db();
+  } catch (e) {
+    console.warn(`[store] MongoDB unavailable: ${(e as Error).message}`);
+    return null;
+  }
+}
+
 async function meetings(): Promise<Collection<MeetingDoc> | null> {
   try {
     const database = await db();

@@ -25,7 +25,6 @@ import {
   applyStateUpdate,
   decideAction,
   emptyState,
-  narrateToolResult,
   postToMeetChat,
   recordCompletedAction,
   type Decision,
@@ -186,6 +185,10 @@ function toolAccessOf(s: Session): ToolAccess {
     federato: servers?.federato !== false,
     intact: servers?.intact === true,
     files,
+    email: servers?.email === true,
+    docs: servers?.docs === true,
+    // Default to requiring approval: an unset guardrail must not mean "just send it".
+    sendApproval: s.config?.guardrails?.sendApproval !== false,
   };
 }
 
@@ -860,6 +863,7 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
     // → narrate again, capped. Every result and every query trace lands in the notes so
     // the operator can see WHY the goose looked where it looked.
     let lastResult = "";
+    let shareUrl: string | undefined;
     const steps = await runToolChain(
       t,
       access,
@@ -871,6 +875,7 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
         memory: s.memory,
         muted: s.muted,
         state: s.state,
+        meetingId: s.id,
       },
       {
         announce: async (say) => {
@@ -879,6 +884,7 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
         },
         onResult: (step) => {
           lastResult = step.result.text;
+          if (step.result.shareUrl) shareUrl = step.result.shareUrl;
           note(s, `Tool result (${step.call.name}): ${step.result.text.slice(0, 400)}`);
           for (const line of step.result.trace ?? []) note(s, `  why: ${line}`);
           recordCompletedAction(s.state, `${step.call.name}(${step.args}) → ${step.result.text.slice(0, 160)}`);
@@ -897,12 +903,19 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
 
     const said = await sayInRoom(s, reply);
 
-    // A spoken summary can't carry a breakdown (a queue, a factor list). Drop the detail
-    // in the chat too, so nobody has to ask for it — but only when it's genuinely more
-    // than what was just said out loud.
-    const detailed = result.includes("\n") || result.length > 220;
-    if (detailed && page && result.trim() !== reply.trim()) {
+    // A share link is the deliverable, and nobody can act on a URL read aloud —
+    // so it goes into the meeting chat verbatim, where everyone can click it.
+    // This is the whole point of the public document server.
+    if (shareUrl && page) {
       await postToMeetChat(page, `${nameOf(s)} — ${result}`);
+    } else {
+      // A spoken summary can't carry a breakdown (a quote's coverage lines, a file
+      // listing). Drop the detail in the chat too, so nobody has to ask for it —
+      // but only when it's genuinely more than what was just said out loud.
+      const detailed = result.includes("\n") || result.length > 220;
+      if (detailed && page && result.trim() !== reply.trim()) {
+        await postToMeetChat(page, `${nameOf(s)} — ${result}`);
+      }
     }
 
     persist(s);

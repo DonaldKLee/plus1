@@ -7,12 +7,14 @@
   ],
   "scripts": {
     "dev": "concurrently -n backend,web -c cyan,magenta \"npm run backend\" \"npm run dashboard\"",
+    "dev:public": "concurrently -n backend,web,tunnel -c cyan,magenta,yellow \"npm run backend\" \"npm run dashboard\" \"npm run tunnel\"",
     "dashboard": "npm run dev -w @plus1/dashboard",
     "backend": "npm run dev -w @plus1/backend",
     "backend:rank": "npm run rank -w @plus1/backend",
     "backend:cache": "npm run cache-refresh -w @plus1/backend",
     "backend:screenshare": "npm run screenshare -w @plus1/backend",
     "backend:google-login": "npm run google-login -w @plus1/backend",
+    "tunnel": "npm run tunnel -w @plus1/backend",
     "test:brain": "npm run test -w @plus1/brain",
     "avatar:preview": "npm run preview -w @plus1/liveavatar",
     "test:avatar": "npm test -w @plus1/liveavatar && npm test -w @plus1/voice"

@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import { Plus1Mark, Button, Chip, cx } from "@/components/ui";
-import { History, Plug, PageMark, External } from "@/components/icons";
+// `Link as LinkIcon`: next/link is already imported as Link in this file.
+import { History, Plug, PageMark, External, Check, Link as LinkIcon } from "@/components/icons";
 import { AGENT_URL } from "@/lib/session";
 import { createChat, sendChatMessage, type ChatMessage } from "@/lib/chat";
 import { QuoteCard } from "./QuoteCard";
@@ -21,11 +22,13 @@ function plus1Name(): string {
   return readConfig().name?.trim() || "plus1";
 }
 
-type Tools = { federato: boolean; files: "off" | "read" | "write" };
+type Tools = { federato: boolean; docs: boolean; email: boolean; files: "off" | "read" | "write" };
 function readTools(): Tools {
   const c = readConfig();
   return {
     federato: c.servers?.federato !== false,
+    docs: c.servers?.docs === true,
+    email: c.servers?.email === true,
     files: !c.servers?.local ? "off" : c.localAccess === "write" ? "write" : "read",
   };
 }
@@ -43,7 +46,7 @@ const INTRO_SPEED_MS = 18; // ms per character
 
 export function Chat() {
   const [name] = useState(plus1Name);
-  const [tools, setTools] = useState<Tools>({ federato: true, files: "off" });
+  const [tools, setTools] = useState<Tools>({ federato: true, docs: false, email: false, files: "off" });
   const [chatId, setChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [introText, setIntroText] = useState("");
@@ -126,11 +129,13 @@ export function Chat() {
       <header className="page-enter shrink-0 border-b border-border bg-bg px-5 py-6 sm:px-7 lg:px-9">
         <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">
-            <GooseMark size={26} className="shrink-0 text-fg" />
+            <Plus1Mark size={26} className="shrink-0 text-fg" />
             <div>
               <h1 className="text-[26px] font-semibold tracking-[-0.04em] text-fg">{name}</h1>
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {tools.federato && <Chip color="var(--act)">federato</Chip>}
+                {tools.docs && <Chip color="var(--think)">pdf</Chip>}
+                {tools.email && <Chip color="var(--live)">email</Chip>}
                 <Link href="/app/plus1" title="configure in the plus1 tab">
                   <Chip
                     color={
@@ -168,7 +173,7 @@ export function Chat() {
           {/* typing intro bubble */}
           {(introText || !introFull) && chatId && (
             <div key={introId} className="flex gap-2.5">
-              <GooseMark size={22} className="mt-0.5 shrink-0 text-fg" />
+              <Plus1Mark size={22} className="mt-0.5 shrink-0 text-fg" />
               <div className="max-w-[80%] rounded-[var(--r-lg)] rounded-tl-[4px] border border-border bg-bg-subtle px-3.5 py-2 text-[14px] leading-relaxed text-fg">
                 {introText}
                 {!introFull && <span className="ml-0.5 inline-block h-[1em] w-[2px] animate-pulse bg-fg-subtle align-middle" />}
@@ -266,9 +271,31 @@ function Spacer() {
   return <span className="w-[22px] shrink-0" aria-hidden />;
 }
 
-/** PDF download + broker-call actions attached to a quote / next-step message. */
+/** Copy the public share link — the thing you'd paste into a chat yourself. */
+function CopyLink({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard.writeText(url).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1600);
+        });
+      }}
+      title={url}
+      aria-label={copied ? "Share link copied" : `Copy share link: ${url}`}
+      className="inline-flex items-center gap-1.5 rounded-[var(--r-sm)] border border-border bg-bg px-3 py-1.5 text-[12.5px] font-medium text-fg transition-colors hover:border-border-strong hover:bg-bg-raise"
+    >
+      {copied ? <Check width={14} height={14} /> : <LinkIcon width={14} height={14} />}
+      {copied ? "Link copied" : "Copy share link"}
+    </button>
+  );
+}
+
+/** PDF download + share link + broker-call actions attached to a message. */
 function Extras({ m }: { m: ChatMessage }) {
-  if (!m.pdfUrl && !m.nextStep) return null;
+  if (!m.pdfUrl && !m.nextStep && !m.shareUrl) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-2">
       {m.pdfUrl && (
@@ -278,10 +305,12 @@ function Extras({ m }: { m: ChatMessage }) {
           rel="noreferrer"
           className="inline-flex items-center gap-1.5 rounded-[var(--r-sm)] border border-border bg-bg px-3 py-1.5 text-[12.5px] font-medium text-fg transition-colors hover:border-border-strong hover:bg-bg-raise"
         >
-          <PageMark width={14} height={14} /> Download quote PDF
+          <PageMark width={14} height={14} />
+          {m.kind === "quote" ? "Download quote PDF" : "Open PDF"}
           <External width={12} height={12} className="text-fg-subtle" />
         </a>
       )}
+      {m.shareUrl && <CopyLink url={m.shareUrl} />}
       {m.nextStep && (
         <Link
           href="/app/meetings"

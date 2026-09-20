@@ -120,6 +120,15 @@ export interface ToolAccess {
   federato?: boolean;
   intact?: boolean;
   files?: "off" | "read" | "write";
+  /** Send email (SMTP). Off unless the plus1 tab turns the Email server on. */
+  email?: boolean;
+  /** Generate PDF documents. */
+  docs?: boolean;
+  /**
+   * guardrails.sendApproval — when true, an email is previewed and confirmed
+   * before it goes out. Not a tool toggle; it changes how email_send behaves.
+   */
+  sendApproval?: boolean;
 }
 
 interface ToolSpec {
@@ -159,6 +168,26 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
     tools.push({
       name: "intact_next_step",
       doc: `intact_next_step — the buy path: offer to book a broker call or point to belairdirect. Use it to close a standard quote, and ALWAYS use it instead of a price when appetite is high_risk/refer. tool.details.appetite optional.`,
+    });
+  }
+  if (access.docs) {
+    tools.push({
+      name: "doc_pdf",
+      doc: `doc_pdf — turn text into a real PDF someone can download, open from a link, or be emailed (meeting notes, a recap, action items, a summary, a one-pager). Call it whenever someone asks for "notes", "a writeup", "a summary", "a doc", or "a PDF". You WRITE the content yourself from the meeting — don't ask them to dictate it. tool.details: title, subtitle (optional, e.g. the date or meeting name), body (the full document text — markdown works: # headings, - bullets, 1. numbered lists, --- rules), filename (optional). NEVER read the resulting link out loud, character by character or otherwise — it's posted into the meeting chat automatically. Just say it's in the chat.`,
+    });
+  }
+  if (access.email) {
+    tools.push({
+      name: "email_send",
+      doc: `email_send — actually email someone. tool.details: to (address; comma-separate a few), cc (optional), subject, body (the full message you wrote), attachPdf (optional — set it to "last" to attach the PDF you just made). ${
+        access.sendApproval
+          ? `IMPORTANT: sending needs approval, so this happens in TWO steps. Your first call returns the exact draft and does NOT send. Read the gist out loud and ask if they want it sent. When a human says yes, call email_send AGAIN with the same details plus details.confirm = true — that one sends. Never claim you sent something after only the first call.`
+          : `It sends immediately, so make sure you have the right address and a body worth sending.`
+      }`,
+    });
+    tools.push({
+      name: "email_status",
+      doc: `email_status — check whether email is actually connected and who it sends as. Use it if a send fails or someone asks whether you can email at all.`,
     });
   }
   if (access.files === "read" || access.files === "write") {
@@ -347,26 +376,42 @@ function buildResponseSchema(tools: ToolSpec[]) {
       content: { type: "string" },
       command: { type: "string" },
     };
+    // `tool.details` is ONE shared object in the response schema, so every
+    // enabled tool family merges its fields into the same property bag.
+    const num = { type: "number" };
+    const str = { type: "string" };
+    const bool = { type: "boolean" };
+    const detailProps: Record<string, unknown> = {};
+
     if (tools.some((t) => t.name.startsWith("intact_"))) {
-      const num = { type: "number" };
-      const str = { type: "string" };
-      const bool = { type: "boolean" };
-      toolProps.details = {
-        type: "object",
-        properties: {
-          product: { type: "string", enum: ["car", "tenant"] },
-          name: str, email: str,
-          driverAge: num, yearsLicensed: num,
-          atFaultAccidents: num, notAtFaultAccidents: num, lastAtFaultYearsAgo: num,
-          minorConvictions: num, majorConvictions: num, accidentForgiveness: bool, tickets: num,
-          province: str, city: str, postal: str,
-          vin: str, vehicleYear: num, vehicleMake: str, vehicleModel: str, vehicleValue: num,
-          annualKm: num, usage: str, coverage: str, deductible: num, bundleHome: bool, winterTires: bool,
-          dwellingType: str, contentsValue: num, liabilityLimit: num, priorClaims: num,
-          hasRoommates: bool, bundleAuto: bool,
-          appetite: str,
-        },
-      };
+      Object.assign(detailProps, {
+        product: { type: "string", enum: ["car", "tenant"] },
+        name: str, email: str,
+        driverAge: num, yearsLicensed: num,
+        atFaultAccidents: num, notAtFaultAccidents: num, lastAtFaultYearsAgo: num,
+        minorConvictions: num, majorConvictions: num, accidentForgiveness: bool, tickets: num,
+        province: str, city: str, postal: str,
+        vin: str, vehicleYear: num, vehicleMake: str, vehicleModel: str, vehicleValue: num,
+        annualKm: num, usage: str, coverage: str, deductible: num, bundleHome: bool, winterTires: bool,
+        dwellingType: str, contentsValue: num, liabilityLimit: num, priorClaims: num,
+        hasRoommates: bool, bundleAuto: bool,
+        appetite: str,
+      });
+    }
+    if (tools.some((t) => t.name === "doc_pdf")) {
+      Object.assign(detailProps, {
+        title: str, subtitle: str, body: str, filename: str, footer: str,
+      });
+    }
+    if (tools.some((t) => t.name.startsWith("email_"))) {
+      Object.assign(detailProps, {
+        to: str, cc: str, subject: str, body: str,
+        attachPdf: str, // a doc id, or "last" for the PDF just generated
+        confirm: bool, // true only on the second call, after a human said yes
+      });
+    }
+    if (Object.keys(detailProps).length > 0) {
+      toolProps.details = { type: "object", properties: detailProps };
     }
     (schema.properties as Record<string, unknown>).tool = { type: "object", properties: toolProps };
   }

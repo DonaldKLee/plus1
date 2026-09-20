@@ -17,7 +17,9 @@ import {
   type ToolAccess,
 } from "./agentBrain.js";
 import { executeTool } from "./tools.js";
+import type { NextStep } from "./intactTools.js";
 import type { SessionConfig } from "./meetTranscribe.js";
+import { getplus1Settings } from "./store.js";
 
 export interface ChatMessage {
   id: string;
@@ -26,6 +28,8 @@ export interface ChatMessage {
   text: string;
   tool?: string; // tool name, when kind === "tool" | "quote"
   quote?: QuoteResult; // structured estimate, when kind === "quote"
+  pdfUrl?: string; // downloadable quote PDF (relative path)
+  nextStep?: NextStep; // broker handoff
   at: string;
 }
 
@@ -119,6 +123,9 @@ export async function sendChatMessage(
   // Always apply the latest config, so toggling tools in the plus1 tab takes
   // effect on the very next message — no reload, no stale session.
   if (config) c.config = { ...c.config, ...config };
+  // No config yet (e.g. a curl session, or a browser that never saved one)? Fall
+  // back to whatever the plus1 tab last saved to MongoDB — same as the meeting.
+  if (!c.config) c.config = ((await getplus1Settings()) as SessionConfig | null) ?? undefined;
 
   c.messages.push(msg("user", clean));
 
@@ -145,16 +152,14 @@ export async function sendChatMessage(
     const announced = decision.say?.trim();
     if (announced) out.push(msg("bob", announced));
 
-    const { text, quote } = await executeTool(call, access);
+    const { text, quote, pdfUrl, nextStep } = await executeTool(call, access);
     recordCompletedAction(c.state, `${call.name}(${args}) → ${text.slice(0, 160)}`);
 
-    if (quote) {
-      const m = msg("bob", text, "quote", call.name);
-      m.quote = quote;
-      out.push(m);
-    } else {
-      out.push(msg("bob", text, "tool", call.name));
-    }
+    const m = quote ? msg("bob", text, "quote", call.name) : msg("bob", text, "tool", call.name);
+    if (quote) m.quote = quote;
+    if (pdfUrl) m.pdfUrl = pdfUrl;
+    if (nextStep) m.nextStep = nextStep;
+    out.push(m);
 
     // Same follow-up turn the meeting runner does: put the tool's answer into
     // Bob's own words and drive the next step, instead of dropping a raw string.

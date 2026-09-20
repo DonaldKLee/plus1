@@ -26,6 +26,7 @@ import {
   updateSessionConfig,
 } from "./meetTranscribe.js";
 import { createChat, getChat, sendChatMessage, updateChatConfig } from "./chat.js";
+import { getQuotePdf } from "./intactPdf.js";
 import {
   deleteMeeting,
   getplus1Settings,
@@ -289,6 +290,18 @@ app.put("/api/plus1/config", async (req, res) => {
 });
 
 // ── Live chat with the plus1 (no meeting) ───────────────────────────────────
+// Serve a generated Intact quote PDF (in-memory, short-lived).
+app.get("/api/intact/quote/:id.pdf", (req, res) => {
+  const bytes = getQuotePdf(String(req.params.id));
+  if (!bytes) {
+    res.status(404).json({ error: "quote expired or not found" });
+    return;
+  }
+  res.setHeader("content-type", "application/pdf");
+  res.setHeader("content-disposition", `inline; filename="intact-quote-${req.params.id}.pdf"`);
+  res.send(Buffer.from(bytes));
+});
+
 app.post("/api/chat/sessions", (req, res) => {
   const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : undefined;
   res.json(createChat(config));

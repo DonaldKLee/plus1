@@ -7,7 +7,7 @@ import { runTool, type Decision, type ToolAccess } from "./agentBrain.js";
 import { runFileTool, READ_TOOLS, WRITE_TOOLS, type FileTool } from "./fileTools.js";
 import { runCommand } from "./shellTools.js";
 import { runFederatoTool } from "./federatoTools.js";
-import { runIntactTool } from "./intactTools.js";
+import { runIntactTool, type NextStep } from "./intactTools.js";
 import type { QuoteResult } from "@plus1/brain";
 
 export type ToolCall = NonNullable<Decision["tool"]>;
@@ -16,6 +16,8 @@ export type ToolCall = NonNullable<Decision["tool"]>;
 export interface ToolResult {
   text: string;
   quote?: QuoteResult;
+  pdfUrl?: string;
+  nextStep?: NextStep;
 }
 
 const t = (text: string): ToolResult => ({ text });
@@ -33,9 +35,9 @@ export async function executeTool(call: ToolCall, access: ToolAccess): Promise<T
 
   if (name.startsWith("intact_")) {
     if (!access.intact) return t("Intact isn't connected right now.");
-    return runIntactTool(name, { query: call.query, details: call.details }).catch((e: Error) =>
-      t(`Intact error: ${e.message}`),
-    );
+    return runIntactTool(name, { query: call.query, details: call.details })
+      .then((r) => ({ text: r.text, quote: r.quote, pdfUrl: r.pdfUrl, nextStep: r.nextStep }))
+      .catch((e: Error) => t(`Intact error: ${e.message}`));
   }
 
   if (name === "run_command") {

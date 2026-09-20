@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Plus1Mark, Button, Chip, cx } from "@/components/ui";
-import { History, Plug } from "@/components/icons";
+import { History, Plug, PageMark, External } from "@/components/icons";
+import { AGENT_URL } from "@/lib/session";
 import { createChat, sendChatMessage, type ChatMessage } from "@/lib/chat";
 import { QuoteCard } from "./QuoteCard";
 
@@ -152,6 +153,7 @@ export function Chat() {
                 <Plus1Mark size={22} className="mt-0.5 shrink-0 text-fg" />
                 <div className="min-w-0 max-w-[92%] flex-1">
                   <QuoteCard q={m.quote} />
+                  <Extras m={m} />
                 </div>
               </div>
             ) : m.kind === "tool" ? (
@@ -165,6 +167,7 @@ export function Chat() {
                   <pre className="tnum overflow-x-auto whitespace-pre-wrap rounded-[var(--r)] border border-border bg-bg-inset px-3 py-2.5 text-[12.5px] leading-relaxed text-fg-muted">
                     {m.text}
                   </pre>
+                  <Extras m={m} />
                 </div>
               </div>
             ) : (
@@ -227,6 +230,34 @@ export function Chat() {
 
 function Spacer() {
   return <span className="w-[22px] shrink-0" aria-hidden />;
+}
+
+/** PDF download + broker-call actions attached to a quote / next-step message. */
+function Extras({ m }: { m: ChatMessage }) {
+  if (!m.pdfUrl && !m.nextStep) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {m.pdfUrl && (
+        <a
+          href={`${AGENT_URL}${m.pdfUrl}`}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-[var(--r-sm)] border border-border bg-bg px-3 py-1.5 text-[12.5px] font-medium text-fg transition-colors hover:border-border-strong hover:bg-bg-raise"
+        >
+          <PageMark width={14} height={14} /> Download quote PDF
+          <External width={12} height={12} className="text-fg-subtle" />
+        </a>
+      )}
+      {m.nextStep && (
+        <Link
+          href="/app/meetings"
+          className="inline-flex items-center gap-1.5 rounded-[var(--r-sm)] bg-inverse-bg px-3 py-1.5 text-[12.5px] font-medium text-inverse-fg transition-opacity hover:opacity-85"
+        >
+          <History width={14} height={14} /> Book a broker call
+        </Link>
+      )}
+    </div>
+  );
 }
 
 function Dotty({ d = 0 }: { d?: number }) {

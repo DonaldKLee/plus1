@@ -17,7 +17,7 @@
     }
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test src/federato/*.test.ts",
+    "test": "node --experimental-strip-types --test src/federato/*.test.ts src/intact/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

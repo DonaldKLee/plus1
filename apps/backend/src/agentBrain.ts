@@ -145,15 +145,27 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
     // These tools quote PERSONAL car + tenant insurance — use them, don't say you only do commercial.
     tools.push({
       name: "intact_quote_car",
-      doc: `intact_quote_car — quote PERSONAL car / auto insurance (Intact, the Canadian insurer). This is exactly what to call when someone asks for a car or auto quote — call it immediately, never say you "only do commercial" or "can't quote personal auto". Put whatever you know in tool.details (driverAge, yearsLicensed, atFaultAccidents, tickets, province, city, postal, vehicleYear, vehicleMake, vehicleModel, vehicleValue, annualKm, usage, coverage[basic|standard|full], deductible). Missing fields default sensibly and come back as stated assumptions — so quote as soon as you have a couple of basics and refine after; DON'T interrogate with a long form, and DON'T stall.`,
+      doc: `intact_quote_car — quote PERSONAL car / auto insurance (Intact, the Canadian insurer). Call it immediately when someone asks for a car/auto quote — never say you "only do commercial". Put what you know in tool.details: driverAge, yearsLicensed, province, city, postal, vehicleYear/Make/Model/Value, annualKm, usage, coverage[basic|standard|full], deductible, bundleHome. For accidents ask AT-FAULT vs NOT-at-fault and roughly when: atFaultAccidents, notAtFaultAccidents, lastAtFaultYearsAgo, minorConvictions, majorConvictions (DUI/careless), accidentForgiveness. Missing fields default and come back as stated assumptions — quote as soon as you have a couple of basics; DON'T interrogate, DON'T stall. If the result's appetite is "high_risk" or "refer", DON'T read out a price — explain it needs a broker and offer intact_next_step.`,
     });
     tools.push({
       name: "intact_quote_tenant",
-      doc: `intact_quote_tenant — quote TENANT / renter insurance (Intact). Call it when someone asks about renter's/tenant/apartment insurance. tool.details: province, city, postal, dwellingType[apartment|condo|house|basement], contentsValue, liabilityLimit, deductible, priorClaims, hasRoommates. Quote early with defaults, refine after.`,
+      doc: `intact_quote_tenant — quote TENANT / renter insurance (Intact). tool.details: province, city, postal, dwellingType[apartment|condo|house|basement], contentsValue, liabilityLimit, deductible, priorClaims, hasRoommates, bundleAuto. Quote early with defaults, refine after.`,
+    });
+    tools.push({
+      name: "intact_vehicle_lookup",
+      doc: `intact_vehicle_lookup — decode a VIN to the exact year/make/model via real vehicle data. Call it if the person gives a VIN, then quote. tool.details.vin (or put the VIN in query).`,
     });
     tools.push({
       name: "intact_explain",
-      doc: `intact_explain(query) — explain one insurance term or coverage (deductible, liability, comprehensive, replacement cost, water backup…) in a plain, friendly sentence.`,
+      doc: `intact_explain(query) — explain one insurance term/coverage (deductible, third-party liability, accident benefits, collision, comprehensive, accident forgiveness, water backup, bundle…) in a plain, friendly sentence.`,
+    });
+    tools.push({
+      name: "intact_email_quote",
+      doc: `intact_email_quote — produce a PDF quote summary the customer can download (and, once Gmail is connected, email). Call it after they've seen a quote and want it sent/saved. tool.details: the same quote fields plus product[car|tenant], name, email.`,
+    });
+    tools.push({
+      name: "intact_next_step",
+      doc: `intact_next_step — the buy path: offer to book a broker call or point to belairdirect. Use it to close a standard quote, and ALWAYS use it instead of a price when appetite is high_risk/refer. tool.details.appetite optional.`,
     });
   }
   if (access.files === "read" || access.files === "write") {
@@ -326,16 +338,21 @@ function buildResponseSchema(tools: ToolSpec[]) {
     if (tools.some((t) => t.name.startsWith("intact_"))) {
       const num = { type: "number" };
       const str = { type: "string" };
+      const bool = { type: "boolean" };
       toolProps.details = {
         type: "object",
         properties: {
           product: { type: "string", enum: ["car", "tenant"] },
-          driverAge: num, yearsLicensed: num, atFaultAccidents: num, tickets: num,
+          name: str, email: str,
+          driverAge: num, yearsLicensed: num,
+          atFaultAccidents: num, notAtFaultAccidents: num, lastAtFaultYearsAgo: num,
+          minorConvictions: num, majorConvictions: num, accidentForgiveness: bool, tickets: num,
           province: str, city: str, postal: str,
-          vehicleYear: num, vehicleMake: str, vehicleModel: str, vehicleValue: num,
-          annualKm: num, usage: str, coverage: str, deductible: num,
+          vin: str, vehicleYear: num, vehicleMake: str, vehicleModel: str, vehicleValue: num,
+          annualKm: num, usage: str, coverage: str, deductible: num, bundleHome: bool, winterTires: bool,
           dwellingType: str, contentsValue: num, liabilityLimit: num, priorClaims: num,
-          hasRoommates: { type: "boolean" },
+          hasRoommates: bool, bundleAuto: bool,
+          appetite: str,
         },
       };
     }

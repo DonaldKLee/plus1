@@ -15,8 +15,8 @@ import {
 } from "@/lib/session";
 
 const STATUS_COLOR: Record<SessionStatus, string> = {
-  joining: "var(--brand)",
-  "waiting-admit": "var(--brand)",
+  joining: "var(--brand-text)",
+  "waiting-admit": "var(--brand-text)",
   listening: "var(--live)",
   ended: "var(--fg-subtle)",
   error: "var(--alert)",

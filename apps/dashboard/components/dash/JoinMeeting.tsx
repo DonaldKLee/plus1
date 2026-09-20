@@ -3,18 +3,24 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button, Input, cx } from "@/components/ui";
-import { Link as LinkIcon, Alert } from "@/components/icons";
+import { Arrow, Link as LinkIcon, Alert } from "@/components/icons";
 import { joinMeeting } from "@/lib/session";
 
 const MEET_RE =
   /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\?.*)?$/i;
 
+/**
+ * The console's primary action, and the only thing on Home that starts work.
+ * It is deliberately the single lifted surface on the page: one shadow, one
+ * black button, everything else flat — so the eye lands here first.
+ */
 export function JoinMeeting() {
   const router = useRouter();
   const [url, setUrl] = useState("");
   const [purpose, setPurpose] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hovered, setHovered] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -45,33 +51,18 @@ export function JoinMeeting() {
   }
 
   return (
-    <section className="rounded-[var(--r-lg)] border border-border bg-bg-subtle">
-      <form onSubmit={submit} className="p-5 sm:p-6">
-        <div className="mb-4">
-          <label
-            htmlFor="meet-purpose"
-            className="mb-1.5 block text-[13px] font-medium text-fg"
-          >
-            What is this meeting for?
-          </label>
-          <Input
-            id="meet-purpose"
-            value={purpose}
-            disabled={busy}
-            onChange={(e) => setPurpose(e.target.value)}
-            placeholder="Tampa warehouse submission review"
-            maxLength={120}
-            autoComplete="off"
-            className="disabled:opacity-50"
-          />
-          <p className="mt-1.5 text-[12px] text-fg-subtle">
-            How the meeting is labelled everywhere in the dashboard. Optional —
-            leave it blank and the first thing said becomes the label.
-          </p>
-        </div>
+    <section className="rise rounded-[var(--r-lg)] border border-border bg-bg shadow-[var(--shadow-key)]">
+      <form onSubmit={submit} className="p-6 sm:p-7">
+        <h2 className="text-[19px] font-semibold tracking-[-0.03em] text-fg">
+          Send the goose into a call
+        </h2>
+        <p className="mt-1.5 text-[13.5px] leading-relaxed text-fg-muted">
+          It joins as a visible guest, transcribes the room, and answers when
+          someone says its name.
+        </p>
 
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
-          <div className="min-w-0 flex-1">
+        <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-start">
+          <div className="min-w-0 lg:flex-[1.15]">
             <label
               htmlFor="meet-url"
               className="mb-1.5 block text-[13px] font-medium text-fg"
@@ -98,25 +89,62 @@ export function JoinMeeting() {
                 aria-invalid={Boolean(error)}
                 aria-describedby={error ? "meet-url-error" : undefined}
                 className={cx(
-                  "pl-9 disabled:opacity-50",
+                  "h-11 pl-9 text-[14.5px] disabled:opacity-50",
                   error && "border-[var(--alert)]",
                 )}
               />
             </div>
           </div>
 
-          <Button
-            type="submit"
-            variant="primary"
-            size="lg"
-            disabled={busy}
-            className="w-full lg:w-auto"
+          <div className="min-w-0 lg:flex-1">
+            <label
+              htmlFor="meet-purpose"
+              className="mb-1.5 block text-[13px] font-medium text-fg"
+            >
+              What it is for{" "}
+              <span className="font-normal text-fg-subtle">· optional</span>
+            </label>
+            <Input
+              id="meet-purpose"
+              value={purpose}
+              disabled={busy}
+              onChange={(e) => setPurpose(e.target.value)}
+              placeholder="Tampa warehouse submission review"
+              maxLength={120}
+              autoComplete="off"
+              className="h-11 text-[14.5px] disabled:opacity-50"
+            />
+          </div>
+
+          <div
+            className="relative w-full lg:mt-[25px] lg:w-auto"
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
           >
-            {busy ? "Sending the plus1…" : "Send the plus1"}
-          </Button>
+            <div
+              className="pointer-events-none absolute bottom-full right-0 z-50"
+              style={{
+                opacity: hovered ? 1 : 0,
+                transform: hovered ? "translateY(0) scale(1)" : "translateY(8px) scale(0.96)",
+                transition: "opacity 0.18s ease, transform 0.18s cubic-bezier(0.16,1,0.3,1)",
+              }}
+            >
+              <img src="/join-call.png" alt="" width={30} height={20} className="h-auto w-[30px]" />
+            </div>
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              disabled={busy}
+              className="w-full"
+            >
+              {busy ? "Sending…" : "Send the goose"}
+              {!busy && <Arrow width={16} height={16} />}
+            </Button>
+          </div>
         </div>
 
-        {error && (
+        {error ? (
           <p
             id="meet-url-error"
             role="alert"
@@ -126,10 +154,15 @@ export function JoinMeeting() {
             <Alert width={14} height={14} className="mt-[2px] shrink-0" />
             {error}
           </p>
+        ) : (
+          <p className="mt-3.5 text-[12.5px] leading-snug text-fg-subtle">
+            Naming the meeting labels it everywhere in the console. Leave it
+            blank and the first thing said becomes the label.
+          </p>
         )}
 
         <p className="mt-3 text-[12.5px] leading-snug text-fg-subtle">
-          The plus1 joins as a visible guest in a local Chrome window, then
+          The goose joins as a visible guest in a local Chrome window, then
           transcribes the room with Gemini. Lines stream in below as people
           speak.
         </p>

@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SVGProps } from "react";
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SVGProps, ImgHTMLAttributes } from "react";
 
 export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
@@ -10,25 +10,35 @@ export function cx(...parts: (string | false | null | undefined)[]) {
  * The plus1 mark: a Canada plus1 head in profile, beak in brand amber, with a
  * suit collar at the neck. Two-tone so it survives on either theme.
  */
-export function Plus1Mark({ size = 24, ...p }: SVGProps<SVGSVGElement> & { size?: number }) {
+export function GooseMark({
+  size = 24,
+  className,
+}: {
+  size?: number;
+  eye?: string;
+  className?: string;
+} & Omit<ImgHTMLAttributes<HTMLImageElement>, "src" | "alt" | "width" | "height">) {
   return (
-    <svg viewBox="0 0 32 32" width={size} height={size} fill="none" aria-hidden {...p}>
-      {/* neck, sweeping down and left out of the head */}
-      <path
-        d="M12.8 19.5C11.4 23.5 10.8 27.4 10.6 31.2h7.8c.2-4 1-7.8 2.2-11.2Z"
-        fill="currentColor"
-      />
-      <ellipse cx="17" cy="13" rx="9" ry="8.4" fill="currentColor" />
-      <path d="M25.4 10.2 31.6 13.4 25.4 16.6Z" fill="var(--brand)" />
-      <circle cx="20.2" cy="11.2" r="1.5" fill="var(--bg)" />
-    </svg>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src="/logo.png"
+      alt=""
+      width={size}
+      height={size}
+      aria-hidden
+      className={cx("inline-block object-contain", className)}
+      style={{ width: size, height: size }}
+    />
   );
 }
+
+/** Alias kept for compatibility with main-branch imports */
+export const Plus1Mark = GooseMark;
 
 export function Wordmark({ className, markSize = 22 }: { className?: string; markSize?: number }) {
   return (
     <span className={cx("inline-flex items-center gap-2", className)}>
-      <Plus1Mark size={markSize} className="text-fg" />
+      <GooseMark size={markSize} />
       <span className="text-[16px] font-semibold tracking-[-0.03em] text-fg">plus1</span>
     </span>
   );
@@ -43,9 +53,9 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 const BTN_VARIANT: Record<NonNullable<ButtonProps["variant"]>, string> = {
   primary:
-    "bg-inverse-bg text-inverse-fg hover:opacity-85 disabled:opacity-40 disabled:hover:opacity-40",
+    "bg-inverse-bg text-inverse-fg shadow-[var(--shadow-sm)] hover:bg-[var(--inverse-bg-hover)] disabled:opacity-40 disabled:hover:bg-inverse-bg",
   secondary:
-    "bg-bg border border-border text-fg hover:bg-bg-raise hover:border-border-strong disabled:opacity-40",
+    "bg-bg border border-border text-fg shadow-[var(--shadow-sm)] hover:bg-bg-subtle hover:border-border-strong disabled:opacity-40",
   ghost: "text-fg-muted hover:text-fg hover:bg-bg-raise disabled:opacity-40",
   brand:
     "bg-brand text-[var(--brand-ink)] hover:brightness-95 disabled:opacity-40",
@@ -109,7 +119,7 @@ export function Panel({
   return (
     <As
       className={cx(
-        "rounded-[var(--r)] border border-border bg-bg-subtle",
+        "rounded-[var(--r)] border border-border bg-bg shadow-[var(--shadow-sm)]",
         className,
       )}
     >
@@ -131,11 +141,11 @@ export function PanelHead({
   return (
     <div
       className={cx(
-        "flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border px-3.5",
+        "flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border px-4",
         className,
       )}
     >
-      <span className="eyebrow">{title}</span>
+      <span className="text-[13px] font-medium tracking-[-0.01em] text-fg">{title}</span>
       {right}
     </div>
   );

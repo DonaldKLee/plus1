@@ -8,20 +8,20 @@ export default function DashboardHome() {
     <>
       <PageHeader
         title="Home"
-        description="Paste a Meet link and send the plus1 in. It joins as a visible guest and transcribes the room live with Gemini."
+        description="Paste a Meet link and the goose joins as a visible guest, transcribing the room live."
       />
 
       <PageBody>
         <JoinMeeting />
 
-        <section className="mt-9">
+        <section className="mt-10">
           <div className="mb-3 flex items-baseline justify-between gap-4">
             <h2 className="text-[15px] font-semibold tracking-[-0.02em] text-fg">
               Recent meetings
             </h2>
             <Link
               href="/app/meetings"
-              className="text-[13px] font-medium text-fg-muted transition-colors hover:text-fg"
+              className="text-[13px] font-medium text-fg-muted underline-offset-4 transition-colors hover:text-fg hover:underline"
             >
               View all
             </Link>

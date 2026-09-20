@@ -36,23 +36,14 @@ export function ArchiveStats() {
   // Defensive: tolerate an older/newer backend that omits a field or still uses
   // the pre-rename name, so a missing stat never crashes the page.
   const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
-  const plus1Lines = n(stats.plus1Lines ?? (stats as { gooseLines?: number }).gooseLines);
-
-  const items: [string, string][] = [
-    ["Meetings archived", String(n(stats.meetings))],
-    ["Lines transcribed", n(stats.lines).toLocaleString()],
-    ["Spoken by the plus1", plus1Lines.toLocaleString()],
-    ["Time in rooms", fmtHours(n(stats.totalDurationMs))],
-  ];
+  const gooseLines = n(stats.plus1Lines ?? (stats as { gooseLines?: number }).gooseLines);
 
   return (
-    <div className="mb-4 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--r)] border border-border bg-border sm:grid-cols-4">
-      {items.map(([label, value]) => (
-        <div key={label} className="bg-bg px-4 py-3">
-          <p className="tnum text-[18px] font-semibold tracking-[-0.02em] text-fg">{value}</p>
-          <p className="text-[12px] text-fg-subtle">{label}</p>
-        </div>
-      ))}
-    </div>
+    <p className="mb-4 text-[13px] leading-relaxed text-fg-muted">
+      <span className="tnum font-medium text-fg">{n(stats.meetings)}</span> meeting{n(stats.meetings) === 1 ? "" : "s"} archived ·{" "}
+      <span className="tnum font-medium text-fg">{n(stats.lines).toLocaleString()}</span> lines transcribed,{" "}
+      <span className="tnum font-medium text-fg">{gooseLines.toLocaleString()}</span> of them spoken by the goose ·{" "}
+      <span className="tnum font-medium text-fg">{fmtHours(n(stats.totalDurationMs))}</span> in rooms
+    </p>
   );
 }

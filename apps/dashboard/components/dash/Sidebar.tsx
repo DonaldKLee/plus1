@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { GooseMark, cx } from "@/components/ui";
+import { Plus1Mark, cx } from "@/components/ui";
 import { Home, History, Menu, Close, Shield, Sliders, Chat } from "@/components/icons";
 import { AGENT_URL } from "@/lib/session";
 
@@ -26,7 +26,7 @@ function Brand() {
       href="/"
       className="flex h-[60px] shrink-0 items-center gap-2.5 px-3 transition-opacity hover:opacity-80"
     >
-      <GooseMark size={28} />
+      <Plus1Mark size={28} />
       <span className="text-[15px] font-semibold tracking-[-0.03em] text-fg">plus1</span>
     </Link>
   );

@@ -8,7 +8,7 @@ export default function Plus1Page() {
     <>
       <PageHeader
         title="plus1"
-        description="Configure the plus1 that joins your meetings — its name and voice, how far it acts on its own, when it asks instead of guessing, and which tools it can reach."
+        description="Configure the plus1 that joins your meetings, like its name and voice, how far it acts on its own, when it asks instead of guessing, and which tools it can reach."
       />
       <PageBody>
         <Plus1Config />

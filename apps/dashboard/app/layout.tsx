@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     template: "%s — plus1",
   },
   description:
-    "Every other meeting assistant records. plus1 is a goose in a business suit that joins your call as a guest, answers when addressed, and does the work while the meeting is still happening.",
+    "Every other meeting assistant records. plus1 joins your call as a visible guest, answers when addressed, and does the work while the meeting is still happening.",
 };
 
 export const viewport: Viewport = {

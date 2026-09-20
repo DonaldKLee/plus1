@@ -77,7 +77,7 @@ export function Chat() {
       .then((id) => {
         if (!alive) return;
         setChatId(id);
-        const full = `hey, i'm ${name.toLowerCase()}. ask me anything, or tell me to do something — i've got the same tools i use in meetings. if it gets involved, i'll offer to hop on a call.`;
+        const full = `hey, i'm ${name.toLowerCase()}. ask me anything, or tell me to do something. I've got the same tools I use in meetings. If it gets involved, I'll offer to hop on a call.`;
         runTyping(full);
       })
       .catch((e: Error) => alive && setError(e.message));
@@ -126,7 +126,7 @@ export function Chat() {
       <header className="page-enter shrink-0 border-b border-border bg-bg px-5 py-6 sm:px-7 lg:px-9">
         <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">
-            <GooseMark size={26} className="shrink-0 text-fg" />
+            <Plus1Mark size={26} className="shrink-0 text-fg" />
             <div>
               <h1 className="text-[26px] font-semibold tracking-[-0.04em] text-fg">{name}</h1>
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -168,7 +168,7 @@ export function Chat() {
           {/* typing intro bubble */}
           {(introText || !introFull) && chatId && (
             <div key={introId} className="flex gap-2.5">
-              <GooseMark size={22} className="mt-0.5 shrink-0 text-fg" />
+              <Plus1Mark size={22} className="mt-0.5 shrink-0 text-fg" />
               <div className="max-w-[80%] rounded-[var(--r-lg)] rounded-tl-[4px] border border-border bg-bg-subtle px-3.5 py-2 text-[14px] leading-relaxed text-fg">
                 {introText}
                 {!introFull && <span className="ml-0.5 inline-block h-[1em] w-[2px] animate-pulse bg-fg-subtle align-middle" />}

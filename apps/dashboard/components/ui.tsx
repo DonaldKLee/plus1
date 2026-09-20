@@ -6,11 +6,7 @@ export function cx(...parts: (string | false | null | undefined)[]) {
 
 /* ---------------------------------------------------------------- brand ---- */
 
-/**
- * The plus1 mark: a Canada plus1 head in profile, beak in brand amber, with a
- * suit collar at the neck. Two-tone so it survives on either theme.
- */
-export function GooseMark({
+export function Plus1Mark({
   size = 24,
   className,
 }: {
@@ -32,13 +28,13 @@ export function GooseMark({
   );
 }
 
-/** Alias kept for compatibility with main-branch imports */
-export const Plus1Mark = GooseMark;
+/** Alias kept for compatibility with older imports */
+export const GooseMark = Plus1Mark;
 
 export function Wordmark({ className, markSize = 22 }: { className?: string; markSize?: number }) {
   return (
     <span className={cx("inline-flex items-center gap-2", className)}>
-      <GooseMark size={markSize} />
+      <Plus1Mark size={markSize} />
       <span className="text-[16px] font-semibold tracking-[-0.03em] text-fg">plus1</span>
     </span>
   );

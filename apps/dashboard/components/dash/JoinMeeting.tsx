@@ -54,7 +54,7 @@ export function JoinMeeting() {
     <section className="rise rounded-[var(--r-lg)] border border-border bg-bg shadow-[var(--shadow-key)]">
       <form onSubmit={submit} className="p-6 sm:p-7">
         <h2 className="text-[19px] font-semibold tracking-[-0.03em] text-fg">
-          Send the goose into a call
+          Send plus1 into a call
         </h2>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-fg-muted">
           It joins as a visible guest, transcribes the room, and answers when
@@ -138,7 +138,7 @@ export function JoinMeeting() {
               disabled={busy}
               className="w-full"
             >
-              {busy ? "Sending…" : "Send the goose"}
+              {busy ? "Sending…" : "Send plus1"}
               {!busy && <Arrow width={16} height={16} />}
             </Button>
           </div>
@@ -162,7 +162,7 @@ export function JoinMeeting() {
         )}
 
         <p className="mt-3 text-[12.5px] leading-snug text-fg-subtle">
-          The goose joins as a visible guest in a local Chrome window, then
+          plus1 joins as a visible guest in a local Chrome window, then
           transcribes the room with Gemini. Lines stream in below as people
           speak.
         </p>

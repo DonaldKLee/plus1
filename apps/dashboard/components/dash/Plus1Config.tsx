@@ -275,8 +275,8 @@ function behaviorSentence(c: Config): string {
         ? "answers when asked and offers to help with the work"
         : "jumps in, drafts, and does the work as the meeting runs";
   const care = `asks before acting when it's under ${c.confidence}% sure`;
-  const honk = c.honk ? `, and honks on disagreement or a monologue past ${c.monologueMin} min` : "";
-  return `${name} ${stance} — it ${care}${honk}.`;
+  const honk = c.honk ? `, and chimes in on disagreement or a monologue past ${c.monologueMin} min` : "";
+  return `${name} ${stance}. It ${care}${honk}.`;
 }
 
 /* -------------------------------------------------------------- screen ---- */
@@ -462,7 +462,7 @@ export function Plus1Config() {
               ariaLabel="Autonomy"
             />
             <p className="mt-2 text-[12.5px] leading-relaxed text-fg-muted">
-              How far the plus1 goes on its own — from quietly capturing the meeting to drafting emails
+              How far the plus1 goes on its own: From quietly capturing the meeting to drafting emails
               and running tools as the conversation happens.
             </p>
           </div>
@@ -488,10 +488,10 @@ export function Plus1Config() {
           {/* honk */}
           <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-6">
             <div className="min-w-0">
-              <span className="text-[13px] font-medium text-fg">Honk</span>
+              <span className="text-[13px] font-medium text-fg">Challenge</span>
               <p className="mt-1 max-w-[52ch] text-[12.5px] leading-relaxed text-fg-muted">
-                The plus1 honks on disagreement, on a long monologue, and any time someone types
-                <span className="tnum"> /honk</span> in the chat.
+                The plus1 chimes in on disagreement, on a long monologue, and any time someone types
+                <span className="tnum"> /challenge</span> in the chat.
               </p>
             </div>
             <div className="flex items-center gap-4">

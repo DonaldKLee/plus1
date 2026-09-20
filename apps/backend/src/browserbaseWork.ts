@@ -119,7 +119,7 @@ async function runWithStagehand(
     browser,
     ...(model ? { model } : {}),
     logging: { level: "error" },
-  });
+  } as Parameters<typeof Stagehand.create>[0]);
   steps.push({
     label: "stagehand.create",
     ok: true,

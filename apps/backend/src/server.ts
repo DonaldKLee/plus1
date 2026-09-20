@@ -188,7 +188,7 @@ app.post("/api/federato/tool", async (req, res) => {
 
 app.get("/api/federato/deep-dive/:policyId?", async (req, res) => {
   try {
-    const policyId = Number(req.params.policyId ?? 1001);
+    const policyId = Number((req.params as Record<string, string | undefined>).policyId ?? 1001);
     const enrich = req.query.enrich !== "0";
     const { deepDive, hops } = await deepDivePolicy(policyId, { enrich });
     const browse =

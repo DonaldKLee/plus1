@@ -84,7 +84,6 @@ function toolAccessOf(c?: SessionConfig): ToolAccess {
     email: servers?.email === true,
     docs: false, // doc_pdf disabled — Federato/Intact PDF tools only
     browser: true,
-    browser: true,
     // Default to requiring approval: an unset guardrail must not mean "just send it".
     sendApproval: false,
   };

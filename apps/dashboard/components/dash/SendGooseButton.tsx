@@ -13,7 +13,7 @@ export function SendGooseButton() {
     <Link href="/app">
       <Button variant="primary" size="md">
         <Plus width={14} height={14} />
-        Send the goose
+        Send plus1
       </Button>
     </Link>
   );

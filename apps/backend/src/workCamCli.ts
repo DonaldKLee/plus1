@@ -66,13 +66,10 @@ async function main() {
   console.log(`  using ${workCamModeLabel(mode)}`);
   console.log("");
 
-  const DEFAULT_MEET = "https://meet.google.com/vhz-nzug-ich";
-  let meetUrl = normalizeMeetUrl(await ask(rl, `Meet link [Enter=${DEFAULT_MEET}]: `));
-  if (!meetUrl) meetUrl = DEFAULT_MEET;
+  let meetUrl = normalizeMeetUrl(await ask(rl, "Meet link: "));
   while (!MEET_RE.test(meetUrl)) {
     console.log("  need https://meet.google.com/abc-defg-hij");
-    meetUrl = normalizeMeetUrl(await ask(rl, `Meet link [Enter=${DEFAULT_MEET}]: `));
-    if (!meetUrl) meetUrl = DEFAULT_MEET;
+    meetUrl = normalizeMeetUrl(await ask(rl, "Meet link: "));
   }
   console.log(`  using ${meetUrl}`);
 

@@ -110,11 +110,6 @@ export function WorldMap() {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [count, setCount] = useState(1284);
-  const [hovered, setHovered] = useState<{
-    i: number;
-    x: number;
-    y: number;
-  } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [pops, setPops] = useState<EmojiPop[]>([]);
   // Live projected positions updated each frame
@@ -283,27 +278,6 @@ export function WorldMap() {
       ctx.globalAlpha = 1;
       sessionPos.current = newPos;
 
-      // hover resolution runs on the frame so it follows the spin
-      if (s.pointer && !s.drag) {
-        let best: { i: number; sx: number; sy: number } | null = null;
-        let bestD = 18;
-        for (const h of hits) {
-          const d = Math.hypot(h.sx - s.pointer.x, h.sy - s.pointer.y);
-          if (d < bestD) {
-            bestD = d;
-            best = h;
-          }
-        }
-        setHovered((cur) => {
-          if (!best) return cur === null ? cur : null;
-          if (cur && cur.i === best.i && Math.abs(cur.x - best.sx) < 1.5)
-            return cur;
-          return { i: best.i, x: best.sx, y: best.sy };
-        });
-      } else if (!s.pointer) {
-        setHovered((cur) => (cur === null ? cur : null));
-      }
-
       raf = requestAnimationFrame(draw);
     };
 
@@ -372,11 +346,9 @@ export function WorldMap() {
     }
   }, []);
 
-  const hot = hovered !== null;
-
   return (
     <figure className="m-0">
-      <div ref={wrap} className="relative mx-auto w-full max-w-[460px]">
+      <div ref={wrap} className="relative mx-auto w-full max-w-[580px]">
         <canvas
           ref={canvas}
           onPointerDown={onPointerDown}
@@ -392,7 +364,7 @@ export function WorldMap() {
           role="img"
           aria-label="An interactive globe showing illustrative live plus1 sessions in eight cities. Drag or use the arrow keys to rotate it."
           className="w-full touch-none select-none rounded-full outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--ring)]"
-          style={{ cursor: dragging ? "grabbing" : hot ? "pointer" : "grab" }}
+          style={{ cursor: dragging ? "grabbing" : "grab" }}
         />
 
         {pops.map((pop) => (
@@ -413,18 +385,6 @@ export function WorldMap() {
           </div>
         ))}
 
-        {hot && hovered && (
-          <div
-            className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-[calc(100%+12px)] rounded-[var(--r-sm)] border border-border bg-bg px-2.5 py-1.5 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.25)]"
-            style={{ left: hovered.x, top: hovered.y }}
-            role="status"
-            aria-label="A goose is in this meeting"
-          >
-            <span aria-hidden="true" className="block text-[32px] leading-none">
-              👋
-            </span>
-          </div>
-        )}
       </div>
 
       {/* The globe's content, for anyone who cannot see or drag it. */}
@@ -435,24 +395,6 @@ export function WorldMap() {
           </li>
         ))}
       </ul>
-
-      <figcaption className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-4">
-        <span className="flex items-center gap-2">
-          <span
-            className="dot dot-pulse"
-            style={{ color: "var(--brand-text)" }}
-          />
-          <span className="tnum text-[13px] font-medium text-fg">
-            {count.toLocaleString()}
-          </span>
-        </span>
-        <span className="text-[13px] text-fg-muted">
-          meetings a plus1 has sat in on
-        </span>
-        <span className="ml-auto text-[12px] text-fg-subtle">
-          Drag to spin · illustrative data
-        </span>
-      </figcaption>
     </figure>
   );
 }

@@ -10,6 +10,7 @@ import {
   applyStateUpdate,
   decideAction,
   emptyState,
+  guardrailClauses,
   plus1_NAME,
   recordCompletedAction,
   type MeetingState,
@@ -62,6 +63,12 @@ function nameOf(c?: SessionConfig): string {
 }
 function autonomyOf(c?: SessionConfig): number {
   return typeof c?.autonomy === "number" ? c.autonomy : 50;
+}
+function personaOf(c?: SessionConfig): string {
+  return c?.persona?.trim() ?? "";
+}
+function guardrailsOf(c?: SessionConfig): string[] {
+  return guardrailClauses(c?.guardrails);
 }
 function toolAccessOf(c?: SessionConfig): ToolAccess {
   const servers = c?.servers;
@@ -140,14 +147,30 @@ export async function sendChatMessage(
   c.messages.push(msg("user", clean));
 
   const access = toolAccessOf(c.config);
-  const decision = await decideAction(transcriptOf(c), {
+  let decision: Awaited<ReturnType<typeof decideAction>>;
+  try {
+    decision = await decideAction(transcriptOf(c), {
     channel: "chat",
     name: nameOf(c.config),
     autonomy: autonomyOf(c.config),
+    persona: personaOf(c.config),
+    guardrails: guardrailsOf(c.config),
     access,
     memory: c.memory,
     state: c.state,
   });
+  } catch (e) {
+    const err = e as Error & { quota?: boolean; transient?: boolean };
+    // Never leave the chat hanging on a dead brain: say what's wrong, in the chat, once per message.
+    const reply = err.quota
+      ? `my brain's offline: ${err.message}`
+      : err.transient
+        ? "gemini's overloaded right now — give me a second and ask again."
+        : `brain error: ${err.message}`;
+    const out = [msg("bob", reply)];
+    c.messages.push(...out);
+    return { messages: out };
+  }
 
   // Hold onto anything worth remembering across turns.
   remember(c, decision.remember);
@@ -169,6 +192,8 @@ export async function sendChatMessage(
         transcript: () => transcriptOf(c),
         name: nameOf(c.config),
         autonomy: autonomyOf(c.config),
+        persona: personaOf(c.config),
+        guardrails: guardrailsOf(c.config),
         channel: "chat",
         memory: c.memory,
         muted: false,

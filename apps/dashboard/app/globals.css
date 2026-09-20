@@ -499,6 +499,98 @@ a {
 }
 
 /* ============================================================================
+   atmosphere — token-derived gradients for welcome / header surfaces
+
+   A cool grey-blue field (the --act hue, with a --think shimmer) reads as
+   calm and trustworthy — the register we want a judge to feel on first sight.
+   It is allowed on greetings, headers and the nav, never where content lives.
+   Every wash is low-alpha and built from the tokens, so the palette is
+   unchanged and text on top still clears its contrast floor. (Class names keep
+   the `warm-` prefix from the earlier amber pass; only the hues changed.)
+   ========================================================================== */
+
+/* The Home greeting band: a cool aurora from the top corners. */
+.warm-hero {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(120% 130% at 6% -30%, color-mix(in srgb, var(--act) 26%, transparent) 0%, transparent 54%),
+    radial-gradient(120% 130% at 100% -20%, color-mix(in srgb, var(--think) 14%, transparent) 0%, transparent 50%),
+    linear-gradient(180deg, color-mix(in srgb, var(--act) 7%, var(--bg)) 0%, var(--bg) 82%);
+}
+
+/* A quieter version for section headers — one faint cool glow, top-right. */
+.warm-soft {
+  background:
+    radial-gradient(130% 150% at 108% -40%, color-mix(in srgb, var(--act) 12%, transparent) 0%, transparent 60%),
+    var(--bg);
+}
+
+/* The nav rail. Its glow sits at the top-right edge so it meets the hero's
+   top-left glow across the hairline — the tint reads as one field spanning
+   the nav and the page, never a white block beside a colored one. */
+.warm-rail {
+  background:
+    radial-gradient(150% 40% at 100% -10%, color-mix(in srgb, var(--act) 20%, transparent) 0%, transparent 58%),
+    linear-gradient(180deg, color-mix(in srgb, var(--act) 6%, var(--bg)) 0%, var(--bg) 30%);
+}
+
+/* Cool inset for a summary/greeting card sitting on the tinted body. */
+.warm-card {
+  background:
+    radial-gradient(120% 160% at 0% 0%, color-mix(in srgb, var(--act) 11%, transparent) 0%, transparent 55%),
+    linear-gradient(180deg, color-mix(in srgb, var(--act) 4%, var(--bg)) 0%, var(--bg) 100%);
+}
+
+/* A soft cool halo behind the plus1 mark — the welcome's one glow. */
+.plus1-halo {
+  position: relative;
+}
+.plus1-halo::before {
+  content: "";
+  position: absolute;
+  inset: -42%;
+  z-index: -1;
+  background: radial-gradient(circle at 50% 48%, color-mix(in srgb, var(--act) 52%, transparent) 0%, transparent 68%);
+  filter: blur(13px);
+  opacity: 0.7;
+}
+
+/* Fine film grain — kills gradient banding and adds a printed-paper warmth.
+   Tiled turbulence, multiplied at a whisper so it never reads as texture. */
+.grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.04;
+  mix-blend-mode: multiply;
+}
+.theme-dark .grain::before {
+  mix-blend-mode: screen;
+  opacity: 0.05;
+}
+
+/* A slow drift for the hero glow, so warmth feels alive but never busy. */
+@media (prefers-reduced-motion: no-preference) {
+  .warm-hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(60% 80% at 85% -20%, color-mix(in srgb, var(--think) 12%, transparent), transparent 70%);
+    animation: warmdrift 14s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+  }
+}
+@keyframes warmdrift {
+  from { transform: translate3d(0, 0, 0); opacity: 0.55; }
+  to { transform: translate3d(-4%, 3%, 0); opacity: 0.9; }
+}
+
+/* ============================================================================
    console layout — three live columns on desktop, one stack on mobile
    ========================================================================== */
 

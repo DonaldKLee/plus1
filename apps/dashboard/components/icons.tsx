@@ -104,3 +104,18 @@ export const Close = (p: P) => (
 export const Mic = (p: P) => (
   <svg {...base(p)}><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" /></svg>
 );
+export const HardDrive = (p: P) => (
+  <svg {...base(p)}><rect x="3" y="5.5" width="18" height="13" rx="2" /><path d="M3 13h18" /><circle cx="7.5" cy="16" r="1" fill="currentColor" stroke="none" /><path d="M11 16h6" /></svg>
+);
+export const Send = (p: P) => (
+  <svg {...base(p)}><path d="M20 4 3 11l6 2.5L12 20l8-16Z" /><path d="m9 13.5 4-4" /></svg>
+);
+export const Target = (p: P) => (
+  <svg {...base(p)}><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.4" /></svg>
+);
+export const Coins = (p: P) => (
+  <svg {...base(p)}><ellipse cx="9" cy="7" rx="5.5" ry="2.6" /><path d="M3.5 7v4.2c0 1.4 2.5 2.6 5.5 2.6s5.5-1.2 5.5-2.6V7" /><path d="M9 13.8V18c0 1.4 2.5 2.6 5.5 2.6s5.5-1.2 5.5-2.6v-7" /><ellipse cx="15" cy="11" rx="5.5" ry="2.6" /></svg>
+);
+export const CalendarLock = (p: P) => (
+  <svg {...base(p)}><path d="M4 6.5h16v6M4 6.5V19a1 1 0 0 0 1 1h6M4 6.5 8 3v4M16 3v4" /><rect x="13" y="14" width="8" height="6" rx="1.2" /><path d="M15 14v-1.5a2 2 0 0 1 4 0V14" /></svg>
+);

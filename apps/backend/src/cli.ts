@@ -5,7 +5,8 @@ import { runBrowserbaseVerification } from "./browserbaseWork.js";
 
 async function main() {
   const cmd = process.argv[2] ?? "rank";
-  if (cmd === "cache") {
+  if (cmd === "warm" || cmd === "cache") {
+    // Pull the schema + expanded property book into this process's memory (nothing on disk).
     const r = await cacheSchemaAndPolicies();
     console.log(JSON.stringify(r, null, 2));
     return;
@@ -48,7 +49,7 @@ async function main() {
     console.log(JSON.stringify({ deepDive, hops, browse }, null, 2));
     return;
   }
-  console.error("Usage: cli.ts [cache|rank|deep-dive] [--refresh] [--browse]");
+  console.error("Usage: cli.ts [warm|rank|deep-dive] [--refresh] [--browse]");
   process.exit(1);
 }
 

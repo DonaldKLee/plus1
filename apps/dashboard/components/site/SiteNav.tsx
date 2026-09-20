@@ -5,13 +5,6 @@ import { useEffect, useState } from "react";
 import { Button, Wordmark, cx } from "@/components/ui";
 import { Menu, Close } from "@/components/icons";
 
-const LINKS = [
-  { href: "#problem", label: "The problem" },
-  { href: "#gate", label: "The gate" },
-  { href: "#capabilities", label: "What it does" },
-  { href: "#limits", label: "Limits" },
-];
-
 export function SiteNav() {
   const [open, setOpen] = useState(false);
   const [stuck, setStuck] = useState(false);
@@ -30,28 +23,13 @@ export function SiteNav() {
         stuck ? "border-border" : "border-transparent",
       )}
     >
-      <div className="mx-auto flex h-16 max-w-[1200px] items-center gap-6 px-5 sm:px-8">
+      <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between px-5 sm:px-8">
         <Link href="/" className="shrink-0 rounded-[var(--r-sm)]">
           <Wordmark markSize={24} />
         </Link>
 
-        <nav className="hidden flex-1 items-center gap-6 md:flex">
-          {LINKS.map((l) => (
-            <a
-              key={l.href}
-              href={l.href}
-              className="text-[14px] font-medium text-fg-muted transition-colors hover:text-fg"
-            >
-              {l.label}
-            </a>
-          ))}
-        </nav>
-
-        <div className="ml-auto flex items-center gap-2 md:ml-0">
+        <div className="flex items-center gap-2">
           <Link href="/app" className="hidden sm:block">
-            <Button variant="ghost" size="md">
-              Sign in
-            </Button>
           </Link>
           <Link href="/app">
             <Button variant="primary" size="md">
@@ -69,7 +47,7 @@ export function SiteNav() {
         </div>
       </div>
 
-      {open && (
+      {/* {open && (
         <div className="border-t border-border bg-bg px-5 py-3 md:hidden">
           <nav className="flex flex-col">
             {LINKS.map((l) => (
@@ -84,7 +62,7 @@ export function SiteNav() {
             ))}
           </nav>
         </div>
-      )}
+      )} */}
     </header>
   );
 }

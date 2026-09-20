@@ -45,6 +45,13 @@ export async function generateJson(
       err.quota = true;
       throw err;
     }
+    if (res.status === 402 || /credits are depleted|billing/i.test(bodyText)) {
+      const err = new Error(
+        "Gemini credits are depleted on this API key (HTTP 402). Top up at https://ai.studio/projects or point GEMINI_API_KEY at another key; the Federato tools keep working, the brain can't decide or narrate until then.",
+      ) as Error & { quota?: boolean };
+      err.quota = true;
+      throw err;
+    }
     const transient = res.status === 429 || res.status >= 500;
     if (!transient) throw new Error(lastErr);
     await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));

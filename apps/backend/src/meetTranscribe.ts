@@ -30,6 +30,7 @@ import {
   applyStateUpdate,
   decideAction,
   emptyState,
+  guardrailClauses,
   postToMeetChat,
   recordCompletedAction,
   type Decision,
@@ -57,6 +58,9 @@ import {
 
 /** Ignore transcription fragments this soon after the plus1 stopped: they're often its own tail. */
 const BARGE_IN_GUARD_MS = 400;
+/** Don't cut the plus1 off for a blip or background noise — only when someone is genuinely
+ *  talking over it. Interrupt once the current human utterance reaches this many words. */
+const BARGE_IN_MIN_WORDS = 3;
 
 // Auto-act tuning.
 const CONFIDENCE_THRESHOLD = Number(process.env.BRAIN_CONFIDENCE ?? 0.7);
@@ -139,6 +143,7 @@ interface Session {
   live?: LiveSocket; // Gemini Live WebSocket
   liveReady?: boolean;
   currentLineId?: string; // the line currently being built from the stream
+  currentSpeaker?: string; // best-effort active speaker name, read from the Meet DOM
   gapTimer?: ReturnType<typeof setTimeout>;
   // Brain / auto-act state.
   page?: Page; // the Meet tab, for chat + speak actions
@@ -174,9 +179,15 @@ interface Session {
 /** Per-session plus1 configuration, sent from the dashboard on join. */
 export interface SessionConfig {
   name?: string;
+  persona?: string; // freeform personality / instructions / context, injected into the prompt
   autonomy?: number; // 0 = notetaker, 100 = action taker
   confidence?: number; // 0..100 — below this it asks instead of guessing
-  guardrails?: { sendApproval?: boolean; noComp?: boolean; noDeadlines?: boolean };
+  guardrails?: {
+    sendApproval?: boolean;
+    groundClaims?: boolean;
+    noComp?: boolean;
+    noDeadlines?: boolean;
+  };
   servers?: Record<string, boolean>;
   localAccess?: "read" | "write"; // when servers.local is on
   email?: { allowlist?: string | string[]; defaultTo?: string };
@@ -185,6 +196,16 @@ export interface SessionConfig {
 /** Configured display name, falling back to the code default. */
 function nameOf(s: Session): string {
   return s.config?.name?.trim() || plus1_NAME;
+}
+
+/** Freeform persona / instructions the operator set, or empty. */
+function personaOf(s: Session): string {
+  return s.config?.persona?.trim() ?? "";
+}
+
+/** The operator's guardrail toggles, resolved to hard rules for the prompt. */
+function guardrailsOf(s: Session): string[] {
+  return guardrailClauses(s.config?.guardrails);
 }
 
 /** Confidence threshold: the tab's 0..100 slider, or the env/default. */
@@ -983,11 +1004,17 @@ async function handleLiveMessage(s: Session, data: unknown): Promise<void> {
 function appendFragment(s: Session, frag: string): void {
   if (s.gapTimer) clearTimeout(s.gapTimer);
 
-  // Barge-in: a human is talking while the plus1 speaks → cut the plus1 off (mechanical, no decision).
+  // Barge-in: cut the plus1 off only when a human is *genuinely* talking over it — not for a
+  // one-word blip or background noise. We wait until the current human utterance reaches a few
+  // words, then interrupt immediately (mechanical, no decision).
   if (s.rig?.isSpeaking && Date.now() - s.lastSpeechEndedAt > BARGE_IN_GUARD_MS && frag.trim()) {
-    s.rig.interrupt();
-    s.openai?.bargeIn();
-    note(s, `Barge-in: someone spoke over the plus1 ("${frag.trim().slice(0, 40)}").`);
+    const current = (s.currentLineId ? s.lines.find((l) => l.id === s.currentLineId)?.text : "") ?? "";
+    const words = `${current} ${frag}`.trim().split(/\s+/).filter(Boolean).length;
+    if (words >= BARGE_IN_MIN_WORDS) {
+      s.rig.interrupt();
+      s.openai?.bargeIn();
+      note(s, `Barge-in: someone spoke over the plus1 ("${`${current} ${frag}`.trim().slice(0, 40)}").`);
+    }
   }
 
   let line = s.currentLineId
@@ -1000,6 +1027,8 @@ function appendFragment(s: Session, frag: string): void {
       at: new Date().toISOString(),
       text: "",
       partial: true,
+      // Whoever the Meet DOM last flagged as speaking gets this line.
+      speaker: s.currentSpeaker,
     };
     s.currentLineId = line.id;
     s.lines.push(line);
@@ -1119,7 +1148,7 @@ function transcriptWindow(s: Session, maxLines = 14): string {
   return s.lines
     .filter((l) => !l.partial)
     .slice(-maxLines)
-    .map((l) => `[${l.agent ? me : "speaker"}] ${l.text}`)
+    .map((l) => `[${l.agent ? me : l.speaker || "speaker"}] ${l.text}`)
     .join("\n");
 }
 
@@ -1165,6 +1194,8 @@ async function runBrain(s: Session): Promise<void> {
       oneOnOne: isOneOnOne(s),
       name: nameOf(s),
       autonomy: autonomyOf(s),
+      persona: personaOf(s),
+      guardrails: guardrailsOf(s),
       access: toolAccessOf(s),
       memory: s.memory,
       muted: s.muted,
@@ -1271,6 +1302,8 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
         transcript: () => transcriptWindow(s),
         name: nameOf(s),
         autonomy: autonomyOf(s),
+        persona: personaOf(s),
+        guardrails: guardrailsOf(s),
         channel: "meeting",
         memory: s.memory,
         muted: s.muted,
@@ -1527,7 +1560,7 @@ async function startAudioCapture(page: Page, s: Session): Promise<void> {
   let lastTap = -1;
   let warnedSilent = false;
 
-  await page.exposeFunction("__plus1Audio", (b64: string, taps: number) => {
+  await page.exposeFunction("__plus1Audio", (b64: string, taps: number, speaker?: string) => {
     if (taps !== lastTap) {
       lastTap = taps;
       s.remoteStreams = taps;
@@ -1540,6 +1573,10 @@ async function startAudioCapture(page: Page, s: Session): Promise<void> {
       s.openai.appendMeetPcm16kBase64(b64);
       return;
     }
+    // Who the Meet DOM says is speaking right now. Kept as the "current speaker"
+    // so the next transcript line the stream produces can be attributed to them.
+    const who = speaker?.trim();
+    if (who) s.currentSpeaker = who;
     const ws = s.live;
     if (ws && ws.readyState === 1 && s.liveReady) {
       ws.send(
@@ -1560,11 +1597,63 @@ async function startAudioCapture(page: Page, s: Session): Promise<void> {
     ({ targetRate, frameMs }) => {
       const w = window as unknown as {
         __plus1Cap?: boolean;
-        __plus1Audio: (b: string, taps: number) => void;
+        __plus1Audio: (b: string, taps: number, speaker?: string) => void;
         __plus1Diag: (m: string) => void;
       };
       if (w.__plus1Cap) return;
       w.__plus1Cap = true;
+
+      // Best-effort active speaker, read from the Google Meet DOM. All remote
+      // audio is mixed into one stream, so the name can't come from the audio —
+      // it comes from Meet's own participant tiles. Reliable in a 1:1 (one other
+      // person → that's the speaker); a good guess in a group (the tile Meet
+      // flags as speaking); empty when unsure, so a line is never mislabelled.
+      const isName = (t: string) => {
+        const s = t.trim();
+        if (!s || s.length > 40) return false;
+        return !/^(you|presenting|is presenting|pinned|more options|muted|unmute|mute)$/i.test(s);
+      };
+      const nameOfTile = (tile: Element): string => {
+        const nn = tile.querySelector("span.notranslate") as HTMLElement | null;
+        if (nn && isName(nn.textContent || "")) return nn.textContent!.trim();
+        const self = tile.querySelector("[data-self-name]") as HTMLElement | null;
+        if (self) {
+          const v = self.getAttribute("data-self-name") || self.textContent || "";
+          if (isName(v)) return v.trim();
+        }
+        const aria = tile.getAttribute("aria-label") || "";
+        if (isName(aria)) return aria.trim();
+        return "";
+      };
+      const readSpeaker = (): string => {
+        try {
+          const tiles = Array.from(document.querySelectorAll("[data-participant-id]"));
+          const byId = new Map<string, Element>();
+          for (const t of tiles) {
+            const id = t.getAttribute("data-participant-id");
+            if (id && !byId.has(id)) byId.set(id, t);
+          }
+          const parts: { name: string; speaking: boolean; self: boolean }[] = [];
+          for (const tile of byId.values()) {
+            const self = !!tile.querySelector("[data-self-name]");
+            const name = nameOfTile(tile);
+            if (!name) continue;
+            // Meet toggles a speaking ring / animated bars; class names are
+            // obfuscated, so match loosely and fall back to aria.
+            const speaking =
+              !!tile.querySelector('[class*="peaking" i],[aria-label*="speaking" i]') ||
+              tile.getAttribute("data-is-speaking") === "true";
+            parts.push({ name, speaking, self });
+          }
+          const others = parts.filter((p) => !p.self);
+          if (others.length === 0) return "";
+          if (others.length === 1) return others[0].name; // 1:1 — unambiguous
+          const sp = others.find((p) => p.speaking);
+          return sp ? sp.name : "";
+        } catch {
+          return "";
+        }
+      };
 
       const ctx = new AudioContext();
       // Programmatically-created contexts often start suspended; without this
@@ -1656,7 +1745,7 @@ async function startAudioCapture(page: Page, s: Session): Promise<void> {
         const bytes = new Uint8Array(out.buffer);
         let bin = "";
         for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-        w.__plus1Audio(btoa(bin), taps);
+        w.__plus1Audio(btoa(bin), taps, readSpeaker());
       }, frameMs);
     },
     { targetRate: TARGET_RATE, frameMs: FRAME_MS },

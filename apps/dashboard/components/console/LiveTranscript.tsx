@@ -299,7 +299,13 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
                   className="text-[13.5px] leading-relaxed"
                   style={{ color: l.agent ? "var(--brand-text)" : "var(--fg)" }}
                 >
-                  {l.agent && <span className="mr-1.5 font-medium">{l.speaker ?? "plus1"}:</span>}
+                  {l.agent ? (
+                    <span className="mr-1.5 font-medium">{l.speaker ?? "plus1"}:</span>
+                  ) : l.speaker ? (
+                    <span className="mr-1.5 font-medium" style={{ color: "var(--act)" }}>
+                      {l.speaker}:
+                    </span>
+                  ) : null}
                   {l.text}
                   {l.partial && (
                     <span

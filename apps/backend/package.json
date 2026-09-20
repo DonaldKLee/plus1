@@ -14,11 +14,12 @@
     "work-cam": "node --import tsx src/workCamCli.ts",
     "workcam-login": "node --import tsx src/workCamLogin.ts",
     "check-screen-recording": "node --import tsx src/checkScreenRecording.ts",
-    "cache-refresh": "node --import tsx src/cli.ts cache",
+    "cache-refresh": "node --import tsx src/cli.ts warm",
     "jev": "node --import tsx src/jevRepl.ts",
     "db:check": "node --import tsx src/seedMeetings.ts check",
     "db:seed": "node --import tsx src/seedMeetings.ts seed",
-    "db:clear": "node --import tsx src/seedMeetings.ts clear"
+    "db:clear": "node --import tsx src/seedMeetings.ts clear",
+    "warm": "node --import tsx src/cli.ts warm"
   },
   "dependencies": {
     "@browserbasehq/sdk": "^2.6.0",

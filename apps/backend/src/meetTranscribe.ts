@@ -977,7 +977,9 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
     // so it goes into the meeting chat verbatim, where everyone can click it.
     // This is the whole point of the public document server.
     if (shareUrl && page) {
-      await postToMeetChat(page, `${nameOf(s)} — ${result}`);
+      // The URL itself is the artifact — dump the whole tool result and
+      // people have to hunt for a clickable link.
+      await postToMeetChat(page, shareUrl);
     } else {
       // A spoken summary can't carry a breakdown (a quote's coverage lines, a file
       // listing). Drop the detail in the chat too, so nobody has to ask for it —

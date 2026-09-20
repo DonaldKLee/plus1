@@ -21,6 +21,7 @@ import { PDFDocument } from "pdf-lib";
 import { CACHE_DIR, envOptional } from "./env.js";
 import { saveDocument, loadDocumentByDocId, loadDocumentByToken } from "./docStore.js";
 import { loadDocFonts, normalizeText, renderTemplate, type Figure } from "./docTemplate.js";
+import { uploadPublicPdf } from "./appwriteDocs.js";
 
 export type { Figure } from "./docTemplate.js";
 
@@ -57,6 +58,8 @@ export interface StoredDoc {
   title: string;
   /** Share token — what a public link carries. */
   token: string;
+  /** Appwrite (or tunnel) URL, when we already uploaded this file. */
+  shareUrl?: string;
   at: number;
 }
 
@@ -116,6 +119,9 @@ export function publicBaseUrl(): string | undefined {
 
 /** The public URL for a token, or undefined when public sharing isn't set up. */
 export function shareUrlFor(token: string): string | undefined {
+  const mappedId = tokens.get(token);
+  const cached = mappedId ? store.get(mappedId)?.shareUrl : undefined;
+  if (cached) return cached;
   const base = publicBaseUrl();
   return base ? `${base}/d/${token}` : undefined;
 }
@@ -208,7 +214,17 @@ export async function renderDocPdf(spec: DocSpec): Promise<RenderedDoc> {
   const token = randomBytes(24).toString("base64url");
   const filename = `${slugify(spec.filename ?? title)}.pdf`;
 
-  store.set(id, { bytes, filename, title, token, at: Date.now() });
+  // Appwrite first — a real https URL people in Meet can click. Tunnel/Mongo
+  // stay as fallback when Appwrite isn't set up.
+  let shareUrl: string | undefined;
+  try {
+    shareUrl = await uploadPublicPdf(bytes, filename);
+  } catch (e) {
+    console.warn(`[doc] appwrite upload failed: ${(e as Error).message}`);
+  }
+  if (!shareUrl) shareUrl = shareUrlFor(token);
+
+  store.set(id, { bytes, filename, title, token, shareUrl, at: Date.now() });
   tokens.set(token, id);
 
   // Mirror to Atlas so the link outlives this process. Awaited (it's a few KB)
@@ -230,6 +246,6 @@ export async function renderDocPdf(spec: DocSpec): Promise<RenderedDoc> {
     pages,
     bytes: bytes.length,
     pdfUrl: `/api/doc/${id}.pdf`,
-    shareUrl: shareUrlFor(token),
+    shareUrl,
   };
 }

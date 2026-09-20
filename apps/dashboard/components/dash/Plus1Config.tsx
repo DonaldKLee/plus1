@@ -37,7 +37,7 @@ const DEFAULT_CONFIG: Config = {
   guardrails: { sendApproval: true, noComp: true, noDeadlines: false },
   // Documents are harmless (a PDF in memory); email leaves the building, so it
   // starts off and stays behind the sendApproval guardrail.
-  servers: { federato: true, intact: false, local: false, docs: true, email: false },
+  servers: { federato: true, intact: false, local: false, docs: true, email: true },
   localAccess: "read",
 };
 
@@ -91,7 +91,8 @@ const SERVERS: { id: ServerId; name: string; monogram: string; summary: string }
     id: "docs",
     name: "Documents",
     monogram: "D",
-    summary: "Write meeting notes, recaps and action items into a real PDF you can download or have emailed.",
+    summary:
+      "Write meeting notes into a PDF, upload it to Appwrite, and drop the public link in Meet chat.",
   },
   {
     id: "email",

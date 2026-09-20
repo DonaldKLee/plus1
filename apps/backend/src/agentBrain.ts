@@ -191,7 +191,7 @@ tool.details:
 - body — the full document in markdown. Supported and rendered properly: # / ## / ### headings, - bullets (and indented sub-bullets), 1. numbered lists, "- [ ] task" / "- [x] done" checklists for action items, | markdown | tables | with |---:| alignment for anything numeric, > callouts for a caveat, --- rules, **Term**: value lines for specs, and inline **bold**, *italic*, \`code\`, [label](url).
 - filename (optional).
 
-NEVER read the resulting link out loud, character by character or otherwise — it's posted into the meeting chat automatically. Just say it's in the chat.`,
+NEVER read the resulting link out loud, character by character or otherwise — it's posted into the meeting chat automatically as a public Appwrite URL. Just say it's in the chat.`,
     });
   }
   if (access.email) {

@@ -32,6 +32,10 @@ import {
 } from "./meetTranscribe.js";
 import { createChat, getChat, sendChatMessage, updateChatConfig } from "./chat.js";
 import { getQuotePdf } from "./intactPdf.js";
+import { loadDoc } from "./docPdf.js";
+import { docFontStatus } from "./docTemplate.js";
+import { emailStatus, verifyEmail } from "./email.js";
+import { startPublicDocs } from "./publicDocs.js";
 import {
   deleteMeeting,
   getplus1Settings,
@@ -40,6 +44,17 @@ import {
   searchMeetings,
   storeEnabled,
 } from "./store.js";
+import {
+  loadWorkCamConfig,
+  persistWorkCamConfig,
+  type WorkCamMode,
+} from "./workCamConfig.js";
+import {
+  getWorkCamSession,
+  listWorkCamSessions,
+  startWorkCam,
+  stopWorkCam,
+} from "./workCamMeet.js";
 
 const app = express();
 const configuredOrigin = envOptional("DASHBOARD_ORIGIN") ?? "http://localhost:3000";
@@ -236,7 +251,8 @@ app.post("/api/meet/join", (req, res) => {
   }
   const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : undefined;
   const purpose = typeof req.body?.purpose === "string" ? req.body.purpose : undefined;
-  const { sessionId } = startMeetTranscription(meetUrl, config, purpose);
+  const workTask = typeof req.body?.task === "string" ? req.body.task : undefined;
+  const { sessionId } = startMeetTranscription(meetUrl, config, purpose, workTask);
   res.json({ sessionId });
 });
 
@@ -359,7 +375,6 @@ app.put("/api/plus1/config", async (req, res) => {
   }
 });
 
-// ── Live chat with the plus1 (no meeting) ───────────────────────────────────
 // Serve a generated Intact quote PDF (in-memory, short-lived).
 app.get("/api/intact/quote/:id.pdf", (req, res) => {
   const bytes = getQuotePdf(String(req.params.id));
@@ -372,6 +387,114 @@ app.get("/api/intact/quote/:id.pdf", (req, res) => {
   res.send(Buffer.from(bytes));
 });
 
+// Serve a generated PDF document. Falls back to Mongo, so a link handed out
+// before a restart still resolves.
+app.get("/api/doc/:id.pdf", async (req, res) => {
+  const doc = await loadDoc(String(req.params.id)).catch(() => undefined);
+  if (!doc) {
+    res.status(404).json({ error: "document expired or not found" });
+    return;
+  }
+  res.setHeader("content-type", "application/pdf");
+  res.setHeader("content-disposition", `inline; filename="${doc.filename}"`);
+  res.send(Buffer.from(doc.bytes));
+});
+
+// Is email actually wired up? The plus1 tab uses this to show a live badge, so
+// nobody discovers mid-demo that sends were dry runs all along.
+app.get("/api/email/status", async (req, res) => {
+  const status = emailStatus();
+  // ?verify=1 opens a real SMTP connection; skip it on a plain poll.
+  if (status.configured && req.query.verify === "1") {
+    const check = await verifyEmail();
+    res.json({ ...status, verified: check.ok, error: check.error });
+    return;
+  }
+  res.json(status);
+});
+
+// ── Work-cam: local Present vs cloud camera ─────────────────────────────────
+app.get("/api/work-cam/config", async (_req, res) => {
+  try {
+    const cfg = await loadWorkCamConfig();
+    res.json(cfg);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+app.put("/api/work-cam/config", async (req, res) => {
+  const mode = req.body?.mode;
+  if (mode !== "local" && mode !== "cloud") {
+    res.status(400).json({ error: 'Expected { mode: "local" | "cloud" }' });
+    return;
+  }
+  try {
+    const cfg = await persistWorkCamConfig({ mode });
+    res.json({ ok: true, ...cfg });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+app.get("/api/work-cam/sessions", (_req, res) => {
+  res.json({ sessions: listWorkCamSessions() });
+});
+
+app.get("/api/work-cam/sessions/:id", (req, res) => {
+  const s = getWorkCamSession(String(req.params.id));
+  if (!s) {
+    res.status(404).json({ error: "No such work-cam session" });
+    return;
+  }
+  res.json(s);
+});
+
+app.post("/api/work-cam/start", async (req, res) => {
+  const meetUrl = typeof req.body?.meetUrl === "string" ? req.body.meetUrl.trim() : "";
+  if (!MEET_RE.test(meetUrl)) {
+    res.status(400).json({
+      error: "Pass a Google Meet URL like https://meet.google.com/abc-defg-hij",
+    });
+    return;
+  }
+  const modeRaw = req.body?.mode;
+  const mode: WorkCamMode | undefined =
+    modeRaw === "local" || modeRaw === "cloud" ? modeRaw : undefined;
+  const task = typeof req.body?.task === "string" ? req.body.task.trim() : undefined;
+  const startUrl =
+    typeof req.body?.startUrl === "string" ? req.body.startUrl.trim() : undefined;
+  const sessionId =
+    typeof req.body?.sessionId === "string" ? req.body.sessionId.trim() : undefined;
+  const connectUrl =
+    typeof req.body?.connectUrl === "string" ? req.body.connectUrl.trim() : undefined;
+
+  try {
+    // startWorkCam is long-running — await it so the response has real status.
+    const session = await startWorkCam({
+      meetUrl,
+      mode,
+      task: task || undefined,
+      startUrl: startUrl || undefined,
+      sessionId: sessionId || undefined,
+      connectUrl: connectUrl || undefined,
+    });
+    res.json(session);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+app.post("/api/work-cam/sessions/:id/stop", async (req, res) => {
+  const ok = await stopWorkCam(String(req.params.id));
+  if (!ok) {
+    res.status(404).json({ error: "No such work-cam session" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+// ── Live chat with the plus1 (no meeting) ───────────────────────────────────
 app.post("/api/chat/sessions", (req, res) => {
   const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : undefined;
   res.json(createChat(config));
@@ -418,4 +541,16 @@ app.post("/api/meet/sessions/:id/leave", async (req, res) => {
 const port = Number(process.env.PORT ?? 8787);
 app.listen(port, () => {
   console.log(`backend listening on http://localhost:${port}`);
+  // Say it at boot, not at render time: generated PDFs silently fall back to the
+  // PDF core fonts when Geist is missing, and that is an operator's problem to
+  // know about rather than a reader's to discover.
+  const fonts = docFontStatus();
+  if (!fonts.ok) {
+    console.warn(
+      `[docPdf] Geist missing from ${fonts.dir} (${fonts.missing.join(", ")}) — PDFs will render in the PDF core fonts`,
+    );
+  }
+  // The public document server is a separate app on a separate port, so only it
+  // ever sits behind the tunnel. Off unless PUBLIC_DOCS=1.
+  startPublicDocs({ mainPort: port });
 });

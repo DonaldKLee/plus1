@@ -17,7 +17,7 @@ export function ConsolePreview() {
   const decision = SAMPLE_DECISION;
 
   return (
-    <div className="theme-dark overflow-hidden rounded-[var(--r-lg)] border border-border bg-bg text-fg">
+    <div className="overflow-hidden rounded-[var(--r-lg)] border border-border bg-bg text-fg">
       {/* console chrome */}
       <div className="flex items-center gap-3 border-b border-border px-4 py-3">
         <Plus1Mark size={18} className="text-fg" />

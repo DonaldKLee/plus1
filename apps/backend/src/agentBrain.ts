@@ -120,6 +120,20 @@ export interface ToolAccess {
   federato?: boolean;
   intact?: boolean;
   files?: "off" | "read" | "write";
+  /** Send email (SMTP). Off unless the plus1 tab turns the Email server on. */
+  email?: boolean;
+  /** Generate PDF documents. */
+  docs?: boolean;
+  /**
+   * Share the Browserbase work browser into Meet and run a task on it.
+   * Default on in meetings so Shannon can Present without a dashboard toggle.
+   */
+  browser?: boolean;
+  /**
+   * guardrails.sendApproval — when true, an email is previewed and confirmed
+   * before it goes out. Not a tool toggle; it changes how email_send behaves.
+   */
+  sendApproval?: boolean;
 }
 
 interface ToolSpec {
@@ -161,6 +175,39 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
       doc: `intact_next_step — the buy path: offer to book a broker call or point to belairdirect. Use it to close a standard quote, and ALWAYS use it instead of a price when appetite is high_risk/refer. tool.details.appetite optional.`,
     });
   }
+  if (access.docs) {
+    tools.push({
+      name: "doc_pdf",
+      doc: `doc_pdf — turn text into a real PDF someone can download, open from a link, or be emailed (meeting notes, a recap, action items, a summary, a one-pager, a comparison). Call it whenever someone asks for "notes", "a writeup", "a summary", "a doc", or "a PDF". You WRITE the content yourself from the meeting — don't ask them to dictate it.
+
+COVER WHAT WAS ASKED FOR. Re-read the request and put every single thing it named in the document. If they asked for pricing, the prices are in it. If they asked for next steps, the owners and dates are in it. Never invent a value and never write a bare "[insert]" placeholder. If something they asked for genuinely never came up, still give it a line and say so plainly — "not discussed on this call", or "Marcus to confirm the deductible" — because a silently missing figure reads as an answer, and this is the exact failure that makes these documents useless.
+
+CARRY THE NUMBERS. Every figure, price, date, percentage, deadline, limit, deductible, count and name that came up goes in verbatim — do not round, do not summarize a number away, do not describe a number in words. Two or more comparable figures belong in a markdown table, never in a sentence.
+
+tool.details:
+- title — what this document is.
+- subtitle (optional) — the date, the meeting, or who it's for.
+- figures (optional but use it whenever numbers matter) — up to 6 key figures as [{label, value, note}], e.g. [{"label":"Annual premium","value":"$1,847","note":"12-month term"}]. These print large at the top, which is the first thing the reader looks for.
+- body — the full document in markdown. Supported and rendered properly: # / ## / ### headings, - bullets (and indented sub-bullets), 1. numbered lists, "- [ ] task" / "- [x] done" checklists for action items, | markdown | tables | with |---:| alignment for anything numeric, > callouts for a caveat, --- rules, **Term**: value lines for specs, and inline **bold**, *italic*, \`code\`, [label](url).
+- filename (optional).
+
+NEVER read the resulting link out loud, character by character or otherwise — it's posted into the meeting chat automatically. Just say it's in the chat.`,
+    });
+  }
+  if (access.email) {
+    tools.push({
+      name: "email_send",
+      doc: `email_send — actually email someone. tool.details: to (address; comma-separate a few), cc (optional), subject, body (the full message you wrote), attachPdf (optional — set it to "last" to attach the PDF you just made). ${
+        access.sendApproval
+          ? `IMPORTANT: sending needs approval, so this happens in TWO steps. Your first call returns the exact draft and does NOT send. Read the gist out loud and ask if they want it sent. When a human says yes, call email_send AGAIN with the same details plus details.confirm = true — that one sends. Never claim you sent something after only the first call.`
+          : `It sends immediately, so make sure you have the right address and a body worth sending.`
+      }`,
+    });
+    tools.push({
+      name: "email_status",
+      doc: `email_status — check whether email is actually connected and who it sends as. Use it if a send fails or someone asks whether you can email at all.`,
+    });
+  }
   if (access.files === "read" || access.files === "write") {
     tools.push({ name: "list_files", doc: `list_files(path?) — list files in the team's shared folder (path optional).` });
     tools.push({ name: "read_file", doc: `read_file(path) — read a text file from the shared folder.` });
@@ -170,6 +217,12 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
     tools.push({
       name: "run_command",
       doc: `run_command(command) — run a shell command on the user's machine to actually get something done that the file tools can't (create a PDF, convert a file, open an app, etc). Set tool.command to the exact bash command.`,
+    });
+  }
+  if (access.browser !== false) {
+    tools.push({
+      name: "browser_work",
+      doc: `browser_work(query) — share YOUR screen into this Meet (Present the Browserbase work tab) and have the cloud browser agent actually do the task on screen. Call this in the SAME turn whenever someone asks you to share your screen, pull something up, look something up on the web, demo a site, play a game, or "show me". Put the full task in tool.query — include any address, name, URL, or details from the meeting. After it finishes, LEAVE THE SCREEN UP for follow-up asks (another browser_work reuses the same window). Do not stop sharing unless they explicitly tell you to. Dedicated tools (federato_*, intact_*, doc_pdf, email_*) still win when they match; this is for doing something visible on screen.`,
     });
   }
   return tools;
@@ -231,6 +284,15 @@ WORKED EXAMPLES (what someone says → what you do, in the same turn):
 - After a tool: lead with the decision or the number, then the ONE factor that drives it, then the next step ("cross continental's a decline: premium's a hundred eighty-eight over the one seventy-five cap and the buildings are seventy-eight. want the next one?").
 `
     : "";
+  const browserNote = opts.tools.some((t) => t.name === "browser_work")
+    ? `
+SCREEN SHARE: you have a live Browserbase work browser you can Present into this Meet.
+- "share your screen and …" / "pull this up" / "show me …" / "look that up on the web" → action="tool", tool.name="browser_work", tool.query=the full task (include names, addresses, URLs from the transcript), say="sharing my screen, one sec".
+- After it returns, the share STAYS UP. Follow-up asks ("now search for X", "click into that") are another browser_work — do not stop presenting.
+- Only stop if they explicitly say stop / stop sharing / you can stop presenting. Until then, leave the window there waiting.
+- If they just say "share your screen" with no task, still call browser_work with a sensible default from context (the thing you were just talking about) rather than asking what to share.
+`
+    : "";
   const mutedNote = opts.muted
     ? `\nYou are in CHAT-ONLY mode right now: someone asked you to stop talking and use the chat. Keep participating exactly as before, but your words go to the meeting chat, not out loud. Stay this way until someone tells you to talk / unmute again.\n`
     : "";
@@ -263,7 +325,7 @@ GUARDRAILS:
 - Never stall silently. If you're working on something, say so.
 - Deflect off-topic noise. If the room drifts onto something you're not here to advise on, give it a beat and steer back to the active task.
 - Be aware other people are in the room. Only speak when you're addressed or when your specific expertise or action is clearly what's needed. When humans are working something out between themselves, stay out of it (action="none").
-${memorySection}${underwriterNote}${mutedNote}${renderState(opts.state)}
+${memorySection}${underwriterNote}${browserNote}${mutedNote}${renderState(opts.state)}
 Act when it is useful and welcome:
 - Someone addresses you ("${name}" or "plus one").
 - Someone asks an open question you or a tool can helpfully answer.
@@ -350,26 +412,51 @@ function buildResponseSchema(tools: ToolSpec[]) {
       content: { type: "string" },
       command: { type: "string" },
     };
+    // `tool.details` is ONE shared object in the response schema, so every
+    // enabled tool family merges its fields into the same property bag.
+    const num = { type: "number" };
+    const str = { type: "string" };
+    const bool = { type: "boolean" };
+    const detailProps: Record<string, unknown> = {};
+
     if (tools.some((t) => t.name.startsWith("intact_"))) {
-      const num = { type: "number" };
-      const str = { type: "string" };
-      const bool = { type: "boolean" };
-      toolProps.details = {
-        type: "object",
-        properties: {
-          product: { type: "string", enum: ["car", "tenant"] },
-          name: str, email: str,
-          driverAge: num, yearsLicensed: num,
-          atFaultAccidents: num, notAtFaultAccidents: num, lastAtFaultYearsAgo: num,
-          minorConvictions: num, majorConvictions: num, accidentForgiveness: bool, tickets: num,
-          province: str, city: str, postal: str,
-          vin: str, vehicleYear: num, vehicleMake: str, vehicleModel: str, vehicleValue: num,
-          annualKm: num, usage: str, coverage: str, deductible: num, bundleHome: bool, winterTires: bool,
-          dwellingType: str, contentsValue: num, liabilityLimit: num, priorClaims: num,
-          hasRoommates: bool, bundleAuto: bool,
-          appetite: str,
+      Object.assign(detailProps, {
+        product: { type: "string", enum: ["car", "tenant"] },
+        name: str, email: str,
+        driverAge: num, yearsLicensed: num,
+        atFaultAccidents: num, notAtFaultAccidents: num, lastAtFaultYearsAgo: num,
+        minorConvictions: num, majorConvictions: num, accidentForgiveness: bool, tickets: num,
+        province: str, city: str, postal: str,
+        vin: str, vehicleYear: num, vehicleMake: str, vehicleModel: str, vehicleValue: num,
+        annualKm: num, usage: str, coverage: str, deductible: num, bundleHome: bool, winterTires: bool,
+        dwellingType: str, contentsValue: num, liabilityLimit: num, priorClaims: num,
+        hasRoommates: bool, bundleAuto: bool,
+        appetite: str,
+      });
+    }
+    if (tools.some((t) => t.name === "doc_pdf")) {
+      Object.assign(detailProps, {
+        title: str, subtitle: str, body: str, filename: str, footer: str,
+        // The key figures, set as data at the top of the page. Declared as a
+        // real array so the model stops burying numbers in prose.
+        figures: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { label: str, value: str, note: str },
+          },
         },
-      };
+      });
+    }
+    if (tools.some((t) => t.name.startsWith("email_"))) {
+      Object.assign(detailProps, {
+        to: str, cc: str, subject: str, body: str,
+        attachPdf: str, // a doc id, or "last" for the PDF just generated
+        confirm: bool, // true only on the second call, after a human said yes
+      });
+    }
+    if (Object.keys(detailProps).length > 0) {
+      toolProps.details = { type: "object", properties: detailProps };
     }
     (schema.properties as Record<string, unknown>).tool = { type: "object", properties: toolProps };
   }

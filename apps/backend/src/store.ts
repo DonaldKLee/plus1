@@ -71,6 +71,8 @@ const COLLECTION = "meetings";
 const SETTINGS = "settings";
 /** Single settings document: there is one plus1 per deployment. */
 const plus1_SETTINGS_ID = "plus1";
+/** Work-cam delivery mode: local Present vs cloud camera. */
+const WORKCAM_SETTINGS_ID = "workcam";
 
 let client: MongoClient | null = null;
 let dbPromise: Promise<Db> | null = null;
@@ -99,6 +101,7 @@ async function db(): Promise<Db | null> {
       // Recent-first listing, plus full-text search over purpose + transcript.
       await meetings.createIndex({ createdAt: -1 }).catch(() => {});
       await ensureTextIndex(meetings);
+      await backfillPreviews(meetings);
       console.log(`[store] connected to MongoDB (db: ${database.databaseName})`);
       return database;
     })().catch((e) => {
@@ -129,6 +132,46 @@ async function ensureTextIndex(col: Collection<MeetingDoc>): Promise<void> {
     } catch (inner) {
       console.warn(`[store] could not rebuild text index: ${(inner as Error).message}`);
     }
+  }
+}
+
+/**
+ * `preview` is computed on save, so meetings stored before it existed have
+ * none and fall back to showing a raw room code. Fill them in once at startup;
+ * after the first pass the query matches nothing and costs a single index hit.
+ */
+async function backfillPreviews(col: Collection<MeetingDoc>): Promise<void> {
+  try {
+    const stale = await col
+      .find({ preview: { $exists: false } }, { projection: { lines: 1 } })
+      .limit(500)
+      .toArray();
+    let filled = 0;
+    for (const doc of stale) {
+      const preview = previewOf(doc.lines ?? []);
+      // Write even when empty, so a meeting with no usable line is not rescanned.
+      await col.updateOne({ _id: doc._id }, { $set: { preview: preview ?? "" } });
+      if (preview) filled += 1;
+    }
+    if (filled) console.log(`[store] backfilled ${filled} meeting preview(s)`);
+  } catch (e) {
+    console.warn(`[store] preview backfill skipped: ${(e as Error).message}`);
+  }
+}
+
+/**
+ * The shared database handle, for sibling modules that persist their own
+ * collections (docStore.ts). Deliberately exported instead of letting each
+ * module build its own client — one MongoClient per process, one connection
+ * pool, one place that knows the URI. Returns null when unconfigured, so
+ * callers degrade to no-ops the same way this module does.
+ */
+export async function sharedDb(): Promise<Db | null> {
+  try {
+    return await db();
+  } catch (e) {
+    console.warn(`[store] MongoDB unavailable: ${(e as Error).message}`);
+    return null;
   }
 }
 
@@ -204,7 +247,7 @@ function toSummary(d: MeetingDoc): MeetingSummary {
     id: d._id,
     meetUrl: d.meetUrl,
     purpose: d.purpose,
-    preview: d.preview,
+    preview: d.preview || undefined,
     status: d.status,
     createdAt: d.createdAt,
     endedAt: d.endedAt,
@@ -350,6 +393,30 @@ export async function saveplus1Settings(config: Record<string, unknown>): Promis
   const r = await safe("saveplus1Settings", () =>
     database.collection<plus1SettingsDoc>(SETTINGS).updateOne(
       { _id: plus1_SETTINGS_ID },
+      { $set: { config, updatedAt: new Date().toISOString() } },
+      { upsert: true },
+    ),
+  );
+  return Boolean(r);
+}
+
+/** Saved work-cam config (`{ mode: "local" | "cloud" }`), or null. */
+export async function getWorkCamSettings(): Promise<Record<string, unknown> | null> {
+  const database = await db().catch(() => null);
+  if (!database) return null;
+  const doc = await safe("getWorkCamSettings", () =>
+    database.collection<plus1SettingsDoc>(SETTINGS).findOne({ _id: WORKCAM_SETTINGS_ID }),
+  );
+  return doc?.config ?? null;
+}
+
+/** Persist work-cam config. Returns false when there is no database. */
+export async function saveWorkCamSettings(config: Record<string, unknown>): Promise<boolean> {
+  const database = await db().catch(() => null);
+  if (!database) return false;
+  const r = await safe("saveWorkCamSettings", () =>
+      database.collection<plus1SettingsDoc>(SETTINGS).updateOne(
+      { _id: WORKCAM_SETTINGS_ID },
       { $set: { config, updatedAt: new Date().toISOString() } },
       { upsert: true },
     ),

@@ -24,6 +24,16 @@ export function ensureDir(dir: string): string {
   return dir;
 }
 
+/**
+ * @deprecated There is no repo `cache/` folder any more. Modules that still import these get the
+ * disposable STATE_DIR (tunnel URL, work-cam config/context, Browserbase work session). Prefer
+ * OUTPUT_DIR for things worth keeping and STATE_DIR for things that aren't.
+ */
+export const CACHE_DIR = STATE_DIR;
+export function ensureCacheDir(): string {
+  return ensureDir(STATE_DIR);
+}
+
 export function env(name: string, fallback?: string): string {
   const v = process.env[name] ?? fallback;
   if (v == null || v === "") {

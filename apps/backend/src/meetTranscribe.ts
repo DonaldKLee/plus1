@@ -19,13 +19,14 @@ import { AvatarRig, LiveAvatarClient, type Emote } from "@plus1/liveavatar";
 import { FillerCache, voiceFromEnv, type ElevenLabsTts, type FillerKind } from "@plus1/voice";
 import { env, envOptional } from "./env.js";
 import { plus1Config } from "./plus1Config.js";
-import { joinMeet, launchMeetChrome } from "./meetPresent.js";
+import { joinMeet, launchMeetChrome, stampWorkTitle, WORK_TAB_TITLE } from "./meetPresent.js";
+import { onJevLiveView, startWorkBrowser, attachWorkBrowser } from "./jevAgent.js";
+import { registerMeetingMedia, unregisterMeetingMedia } from "./browserWork.js";
 import {
   plus1_NAME,
   applyStateUpdate,
   decideAction,
   emptyState,
-  narrateToolResult,
   postToMeetChat,
   recordCompletedAction,
   type Decision,
@@ -115,6 +116,7 @@ interface Session {
   id: string;
   meetUrl: string;
   purpose?: string; // what the meeting is for — the dashboard's label for it
+  workTask?: string; // optional jev prompt for the work browser
   status: SessionStatus;
   createdAt: string;
   startedAt?: number; // Date.now() when listening began
@@ -129,6 +131,9 @@ interface Session {
   gapTimer?: ReturnType<typeof setTimeout>;
   // Brain / auto-act state.
   page?: Page; // the Meet tab, for chat + speak actions
+  workPage?: Page; // Browserbase live-view tab the avatar presents
+  workSessionId?: string;
+  workLiveOff?: () => void;
   decisions: DecisionRecord[];
   brainTimer?: ReturnType<typeof setTimeout>;
   brainBusy?: boolean;
@@ -186,6 +191,11 @@ function toolAccessOf(s: Session): ToolAccess {
     federato: servers?.federato !== false,
     intact: servers?.intact === true,
     files,
+    email: servers?.email === true,
+    docs: servers?.docs === true,
+    browser: true,
+    // Default to requiring approval: an unset guardrail must not mean "just send it".
+    sendApproval: s.config?.guardrails?.sendApproval !== false,
   };
 }
 
@@ -250,6 +260,9 @@ function setStatus(s: Session, status: SessionStatus, error?: string): void {
 
 /** Tear down the Live socket, gap timer, and Chrome window (flushing the profile). */
 async function closeContext(s: Session): Promise<void> {
+  unregisterMeetingMedia(s.id);
+  s.workLiveOff?.();
+  s.workLiveOff = undefined;
   if (s.gapTimer) clearTimeout(s.gapTimer);
   finalizeLine(s);
   try {
@@ -382,12 +395,14 @@ export function startMeetTranscription(
   meetUrl: string,
   config?: SessionConfig,
   purpose?: string,
+  workTask?: string,
 ): { sessionId: string } {
   const id = randomUUID();
   const session: Session = {
     id,
     meetUrl,
     purpose: purpose?.trim() || undefined,
+    workTask: workTask?.trim() || undefined,
     status: "joining",
     createdAt: new Date().toISOString(),
     notes: [],
@@ -461,7 +476,7 @@ async function runSession(s: Session): Promise<void> {
     }
   }
 
-  const context = await launchMeetChrome();
+  const context = await launchMeetChrome({ purpose: "avatar" });
   s.context = context;
 
   // If the operator closes the Chrome window, end the session cleanly.
@@ -481,8 +496,26 @@ async function runSession(s: Session): Promise<void> {
   // the browser; seed a shim so page.evaluate(fn) doesn't throw ReferenceError.
   await context.addInitScript({ content: NAME_SHIM });
 
-  const page = context.pages()[0] ?? (await context.newPage());
+  // Work tab first so Chrome can auto-select it by title when the avatar Presents.
+  const workPage = context.pages()[0] ?? (await context.newPage());
+  s.workPage = workPage;
+  await stampWorkTitle(workPage);
+  note(s, `Work tab titled "${WORK_TAB_TITLE}" — will hold the Browserbase live view`);
+
+  const page = await context.newPage();
   s.page = page;
+  registerMeetingMedia(s.id, {
+    meetPage: page,
+    workPage,
+    note: (msg) => note(s, msg),
+    speak: async (text) => {
+      await sayInRoom(s, text);
+    },
+    filler: async (kind) => {
+      await playFiller(s, kind);
+    },
+    busy: () => !!(s.rig?.isSpeaking || s.muted),
+  });
 
   // The plus1's face and voice. Must be prepared BEFORE navigating: the (tiny) init script
   // replaces getUserMedia so the camera/mic Meet acquires are the avatar canvas and mixer.
@@ -493,6 +526,26 @@ async function runSession(s: Session): Promise<void> {
   await page.goto(s.meetUrl, { waitUntil: "commit", timeout: 30_000 }).catch((e) => note(s, `goto: ${(e as Error).message.split("\n")[0]} (continuing)`));
   note(s, `Opened Meet ${s.meetUrl}`);
   setStatus(s, "joining");
+
+  const workNotes: string[] = [];
+  workNotes.push = ((...items: string[]) => {
+    for (const item of items) note(s, item);
+    return Array.prototype.push.apply(workNotes, items as string[]);
+  }) as typeof workNotes.push;
+  const initialTask = s.workTask?.trim();
+  const workP = initialTask
+    ? startWorkBrowser(workNotes, initialTask)
+    : attachWorkBrowser(workNotes);
+
+  s.workLiveOff = onJevLiveView((url, sessionId) => {
+    if (s.status === "ended" || s.status === "error") return;
+    s.workSessionId = sessionId;
+    note(s, `Work session moved → ${sessionId}; reloading live view`);
+    void workPage
+      .goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 })
+      .then(() => stampWorkTitle(workPage))
+      .catch((e) => note(s, `live-view reload: ${(e as Error).message}`));
+  });
 
   // Start the avatar while the prejoin screen is up so the camera preview already shows it.
   const avatarUp = rig
@@ -509,6 +562,26 @@ async function runSession(s: Session): Promise<void> {
   await avatarUp;
   // Meet reloads the tab after sign-in and on some errors; re-plumb the avatar when that happens.
   page.on("load", () => void rig?.reattach());
+
+  try {
+    const work = await Promise.race([
+      workP,
+      new Promise<null>((r) => setTimeout(() => r(null), 25_000)),
+    ]);
+    if (work) {
+      s.workSessionId = work.sessionId;
+      note(s, `Opening work tab → ${work.liveViewUrl}`);
+      await workPage.goto(work.liveViewUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    } else {
+      note(s, "Work browser still starting — Present waits until Shannon is asked to share.");
+    }
+  } catch (e) {
+    note(s, `Work browser: ${(e as Error).message}`);
+  }
+
+  await stampWorkTitle(workPage);
+  await page.bringToFront().catch(() => undefined);
+  note(s, `Work tab ready ("${WORK_TAB_TITLE}"). Will Present only when asked to share.`);
 
   s.startedAt = Date.now();
   if (!rig) note(s, "No LIVEAVATAR_API_KEY — the plus1 can chat and use tools, but has no face or voice.");
@@ -860,6 +933,7 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
     // → narrate again, capped. Every result and every query trace lands in the notes so
     // the operator can see WHY the goose looked where it looked.
     let lastResult = "";
+    let shareUrl: string | undefined;
     const steps = await runToolChain(
       t,
       access,
@@ -871,6 +945,7 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
         memory: s.memory,
         muted: s.muted,
         state: s.state,
+        meetingId: s.id,
       },
       {
         announce: async (say) => {
@@ -879,6 +954,7 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
         },
         onResult: (step) => {
           lastResult = step.result.text;
+          if (step.result.shareUrl) shareUrl = step.result.shareUrl;
           note(s, `Tool result (${step.call.name}): ${step.result.text.slice(0, 400)}`);
           for (const line of step.result.trace ?? []) note(s, `  why: ${line}`);
           recordCompletedAction(s.state, `${step.call.name}(${step.args}) → ${step.result.text.slice(0, 160)}`);
@@ -897,12 +973,19 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
 
     const said = await sayInRoom(s, reply);
 
-    // A spoken summary can't carry a breakdown (a queue, a factor list). Drop the detail
-    // in the chat too, so nobody has to ask for it — but only when it's genuinely more
-    // than what was just said out loud.
-    const detailed = result.includes("\n") || result.length > 220;
-    if (detailed && page && result.trim() !== reply.trim()) {
+    // A share link is the deliverable, and nobody can act on a URL read aloud —
+    // so it goes into the meeting chat verbatim, where everyone can click it.
+    // This is the whole point of the public document server.
+    if (shareUrl && page) {
       await postToMeetChat(page, `${nameOf(s)} — ${result}`);
+    } else {
+      // A spoken summary can't carry a breakdown (a quote's coverage lines, a file
+      // listing). Drop the detail in the chat too, so nobody has to ask for it —
+      // but only when it's genuinely more than what was just said out loud.
+      const detailed = result.includes("\n") || result.length > 220;
+      if (detailed && page && result.trim() !== reply.trim()) {
+        await postToMeetChat(page, `${nameOf(s)} — ${result}`);
+      }
     }
 
     persist(s);
@@ -961,15 +1044,20 @@ async function sayInRoom(s: Session, text: string): Promise<SaidResult> {
 
 /** Play a cached filler so a slow tool doesn't leave dead air. Never throws. */
 function startFiller(s: Session): Promise<void> | undefined {
-  if (!s.rig || s.muted) return undefined;
-  const f = s.fillers?.pick("checking") ?? s.fillers?.pick("ack");
-  if (!f) return undefined;
+  if (!s.rig || s.muted || !s.fillers) return undefined;
+  return playFiller(s, "checking");
+}
+
+async function playFiller(s: Session, kind: FillerKind): Promise<void> {
+  if (!s.rig || s.muted) return;
+  const f = s.fillers?.pick(kind) ?? s.fillers?.pick("thinking") ?? s.fillers?.pick("ack");
+  if (!f) return;
   try {
     const u = s.rig.speakPcm(f.pcm, { label: f.phrase });
     plus1Line(s, f.phrase, u.done);
-    return u.done.then(() => undefined).catch(() => undefined);
+    await u.done.catch(() => undefined);
   } catch {
-    return undefined;
+    /* ignore */
   }
 }
 

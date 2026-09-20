@@ -1,18 +1,46 @@
 /**
- * Playwright: join Google Meet and Present the Browserbase live-view tab.
- *
- * Chrome's native share picker cannot be clicked from the page, so we
- * stamp the work tab title and pass --auto-select-tab-capture-source-by-title.
- * First run: sign into Google once in the headed window; the profile is reused.
+ * Playwright: join Google Meet and Present from a dedicated plus1 Chrome profile.
+ * Sign in once in that window — we do not hijack your daily Chrome (that hung).
  */
 
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { BrowserContext, Page } from "playwright-core";
 import { chromium } from "playwright-core";
 import { PROFILE_DIR, ROOT, STATE_DIR, ensureDir, envOptional } from "./env.js";
 
+/**
+ * On macOS, check if Google Chrome has Screen Recording permission.
+ * Returns true if permission is granted or we can't determine (non-macOS).
+ */
+export function checkMacScreenRecordingPermission(): { ok: boolean; hint?: string } {
+  if (process.platform !== "darwin") return { ok: true };
+  try {
+    // Query TCC database for Screen Recording permission for Chrome
+    const result = execSync(
+      `sqlite3 ~/Library/Application\\ Support/com.apple.TCC/TCC.db "SELECT auth_value FROM access WHERE service='kTCCServiceScreenCapture' AND client LIKE '%Chrome%'" 2>/dev/null || echo ""`,
+      { encoding: "utf-8", timeout: 3000 },
+    ).trim();
+    // auth_value: 0=denied, 2=allowed. Empty = we can't read TCC (SIP) — don't scare.
+    if (!result || result.includes("2")) return { ok: true };
+    if (result.split(/\s+/).every((v) => v === "0")) {
+      return {
+        ok: false,
+        hint: "Grant Screen Recording permission to Google Chrome:\n  System Settings → Privacy & Security → Screen Recording → Google Chrome ✓\n  Then restart Chrome.",
+      };
+    }
+    return { ok: true };
+  } catch {
+    // Can't read TCC, assume ok and let runtime fail if needed
+    return { ok: true };
+  }
+}
+
 export const WORK_TAB_TITLE = "plus1-work";
+
+/** goose = fake cam/mic for LiveAvatar; present = screenshare; avatar = both. */
+export type MeetChromePurpose = "goose" | "present" | "avatar";
 
 export interface MeetPresentResult {
   joined: boolean;
@@ -35,11 +63,6 @@ export function screenshareProfileDir(): string {
   return override ? path.resolve(ROOT, override) : PROFILE_DIR;
 }
 
-/**
- * Chrome keeps a SingletonLock in the profile dir; a crashed or killed run
- * leaves it behind, and the next launch just hands off to the "existing"
- * (dead) session and exits. Clear the stale locks so we can relaunch.
- */
 function clearSingletonLocks(): void {
   const dir = screenshareProfileDir();
   for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
@@ -51,36 +74,52 @@ function clearSingletonLocks(): void {
   }
 }
 
-async function launchOnce() {
+function chromeArgs(purpose: MeetChromePurpose): string[] {
+  const args = [
+    "--autoplay-policy=no-user-gesture-required",
+    "--disable-blink-features=AutomationControlled",
+  ];
+  if (purpose === "goose") {
+    args.push("--use-fake-ui-for-media-stream");
+    return args;
+  }
+  // Present / avatar: real tab capture for screensharing the BB live-view tab.
+  args.push(
+    "--enable-usermedia-screen-capturing",
+    "--allow-http-screen-capture",
+    `--auto-select-tab-capture-source-by-title=${WORK_TAB_TITLE}`,
+    `--auto-select-desktop-capture-source=${WORK_TAB_TITLE}`,
+  );
+  // Avatar: same Present flags, no --use-fake-ui-for-media-stream.
+  // That flag auto-picks a fake camera for getDisplayMedia and screenshare never starts.
+  // Camera/mic for LiveAvatar come from grantPermissions + the in-page fake devices.
+  return args;
+}
+
+async function launchOnce(purpose: MeetChromePurpose) {
+  clearSingletonLocks();
   return chromium.launchPersistentContext(screenshareProfileDir(), {
     headless: false,
     executablePath: chromePath(),
-    // The LiveAvatar bridge opens a LiveKit WebSocket from inside the Meet tab; Meet's CSP would block it.
-    bypassCSP: true,
+    bypassCSP: purpose === "goose" || purpose === "avatar",
     ignoreDefaultArgs: [
       "--enable-automation",
       "--disable-component-extensions-with-background-pages",
     ],
-    args: [
-      "--autoplay-policy=no-user-gesture-required",
-      "--disable-blink-features=AutomationControlled",
-      "--use-fake-ui-for-media-stream", // auto-accept the camera/mic prompt (the devices are the avatar's canvas + mixer)
-      `--auto-select-tab-capture-source-by-title=${WORK_TAB_TITLE}`,
-      `--auto-select-desktop-capture-source=${WORK_TAB_TITLE}`,
-    ],
+    args: chromeArgs(purpose),
     viewport: { width: 1440, height: 900 },
   });
 }
 
-export async function launchMeetChrome() {
+export async function launchMeetChrome(opts?: { purpose?: MeetChromePurpose }) {
+  const purpose = opts?.purpose ?? "goose";
   try {
-    return await launchOnce();
+    return await launchOnce(purpose);
   } catch (e) {
     const msg = (e as Error).message;
-    // Stale profile lock from a prior crashed run — clear it and retry once.
     if (/existing browser session|SingletonLock|already in use/i.test(msg)) {
       clearSingletonLocks();
-      return await launchOnce();
+      return await launchOnce(purpose);
     }
     throw e;
   }
@@ -149,7 +188,7 @@ async function dismissNoise(page: Page): Promise<void> {
   }
 }
 
-async function stampWorkTitle(page: Page): Promise<void> {
+export async function stampWorkTitle(page: Page): Promise<void> {
   try {
     await page.evaluate((title) => {
       document.title = title;
@@ -221,6 +260,13 @@ export interface JoinOptions {
   camera?: "on" | "off";
   /** Guest display name if the profile isn't signed in. */
   displayName?: string;
+  /**
+   * Stop on the prejoin screen after mic/cam are set — do not click Join yet.
+   * Caller starts media (e.g. work-cam screencast), then calls awaitMeetAdmission().
+   */
+  deferJoin?: boolean;
+  /** If false, do not join as a guest (Meet will refuse anonymous). Default true. */
+  allowGuest?: boolean;
 }
 
 export async function joinMeet(page: Page, notes: string[], opts: JoinOptions = {}): Promise<boolean> {
@@ -232,8 +278,26 @@ export async function joinMeet(page: Page, notes: string[], opts: JoinOptions = 
 
   const nameBox = page.getByLabel(/your name/i).first();
   if (await nameBox.isVisible().catch(() => false)) {
-    notes.push("Guest name field is showing — this profile is not signed into Google.");
-    await nameBox.fill(opts.displayName ?? "plus1 UW");
+    notes.push("Guest name field is showing — this plus1 Chrome is not signed into Google.");
+    if (opts.allowGuest === false) {
+      notes.push("SIGN IN in this Chrome window (your Google account). Waiting 3 minutes…");
+      await clickNamed(page, /sign in/i, 3000);
+      const until = Date.now() + 180_000;
+      while (Date.now() < until) {
+        const stillGuest = await nameBox.isVisible().catch(() => false);
+        if (!stillGuest && !/accounts\.google\.com|signin/i.test(page.url())) {
+          notes.push("Signed in — continuing.");
+          break;
+        }
+        await page.waitForTimeout(1500);
+      }
+      if (await nameBox.isVisible().catch(() => false)) {
+        notes.push("Still a guest after 3 minutes — not joining anonymously.");
+        return false;
+      }
+    } else {
+      await nameBox.fill(opts.displayName ?? "plus1 UW");
+    }
   } else {
     notes.push("Signed-in Meet prejoin (no guest name field).");
   }
@@ -245,7 +309,7 @@ export async function joinMeet(page: Page, notes: string[], opts: JoinOptions = 
     if (!(await clickNamed(page, /turn off (microphone|mic)/i, 1200))) {
       await page.keyboard.press(`${mods}+d`).catch(() => {});
     }
-    notes.push("Joined muted.");
+    notes.push(opts.deferJoin ? "Prejoin: mic off." : "Joined muted.");
   } else {
     notes.push("Joining unmuted so the plus1 can speak.");
   }
@@ -258,6 +322,20 @@ export async function joinMeet(page: Page, notes: string[], opts: JoinOptions = 
   }
   await dismissNoise(page);
 
+  if (opts.deferJoin) {
+    notes.push("Prejoin ready — not joining yet (waiting for camera stream).");
+    return true;
+  }
+
+  return awaitMeetAdmission(page, notes, { camera: opts.camera });
+}
+
+/** Click Join / Ask to join and wait until actually in the call (or refused). */
+export async function awaitMeetAdmission(
+  page: Page,
+  notes: string[],
+  opts: { camera?: "on" | "off"; timeoutMs?: number } = {},
+): Promise<boolean> {
   const inMeeting = () =>
     page
       .getByRole("button", { name: /leave call|end call|present now|share screen/i })
@@ -270,12 +348,9 @@ export async function joinMeet(page: Page, notes: string[], opts: JoinOptions = 
     return true;
   }
 
-  // Keep trying the Join control — it can take a few seconds to enable, and
-  // Meet sometimes throws up a dialog between clicks.
-  // Meet shows this when the host denies/ignores an anonymous "Ask to join", or the org blocks guests.
   const refused = page.getByText(/can't join this video call|you can.t join|denied your request|no one responded/i).first();
 
-  const deadline = Date.now() + (opts.camera === "on" ? 180_000 : 60_000);
+  const deadline = Date.now() + (opts.timeoutMs ?? (opts.camera === "on" ? 180_000 : 60_000));
   let clickedOnce: string | null = null;
   while (Date.now() < deadline) {
     if (await inMeeting()) {
@@ -312,43 +387,102 @@ export async function joinMeet(page: Page, notes: string[], opts: JoinOptions = 
   return false;
 }
 
-async function presentWorkTab(page: Page, notes: string[]): Promise<boolean> {
+/** Click Present / Share screen. Local Chrome can actually share; BB cloud cannot. */
+export async function presentWorkTab(page: Page, notes: string[]): Promise<boolean> {
+  // Check macOS TCC permission first
+  const tcc = checkMacScreenRecordingPermission();
+  if (!tcc.ok && tcc.hint) {
+    notes.push(`⚠️  macOS Screen Recording not granted:\n${tcc.hint}`);
+  }
+
   const already = await page.getByText(/you('re| are) presenting/i).first().isVisible().catch(() => false);
   if (already) {
     notes.push("Already presenting.");
     return true;
   }
 
-  const opened =
-    (await clickNamed(page, /present now/i, 8000)) ||
-    (await clickNamed(page, /share screen/i, 3000)) ||
-    (await clickNamed(page, /^present$/i, 3000));
-  if (!opened) {
-    notes.push("Could not find Present now.");
-    return false;
+  // Clear a leftover failure dialog from a prior attempt
+  const shareFail = page.getByText(/can't share your screen|something went wrong when screen sharing/i).first();
+  if (await shareFail.isVisible().catch(() => false)) {
+    await clickNamed(page, /^ok$/i, 2000);
+    notes.push("Dismissed prior Can't share dialog.");
   }
-  notes.push("Opened Present.");
 
-  // Optional: pick "A tab" in Meet's chooser before Chrome's picker.
-  await clickNamed(page, /^a tab$/i, 2500);
-  await clickNamed(page, /chrome tab/i, 1200);
-  await clickNamed(page, /^share$/i, 2500);
+  const attempt = async (attemptNum: number): Promise<boolean> => {
+    notes.push(`Present attempt ${attemptNum}...`);
+    
+    const opened =
+      (await clickNamed(page, /present now/i, 8000)) ||
+      (await clickNamed(page, /share screen/i, 3000)) ||
+      (await clickNamed(page, /^present$/i, 3000));
+    if (!opened) {
+      notes.push("Could not find Present now button.");
+      return false;
+    }
+    notes.push("Clicked Present now.");
 
-  // Flag should auto-accept the tab titled plus1-work.
-  await page.waitForTimeout(2000);
+    // Wait a moment for the picker menu to appear
+    await page.waitForTimeout(800);
+
+    // Click "A tab" to select tab capture mode
+    const clickedTab = await clickNamed(page, /^a tab$/i, 3000) || await clickNamed(page, /chrome tab/i, 2000);
+    if (clickedTab) {
+      notes.push("Selected 'A tab' option.");
+    }
+
+    // The Chrome picker should now appear with auto-selected tab by title flag.
+    // Wait for picker and try clicking Share
+    await page.waitForTimeout(1500);
+    
+    const clickedShare = await clickNamed(page, /^share$/i, 4000);
+    if (clickedShare) {
+      notes.push("Clicked Share in picker.");
+    }
+
+    // Give Meet time to process
+    await page.waitForTimeout(3000);
+
+    const presenting = await page
+      .getByText(/you('re| are) presenting|stop presenting|presenting to everyone/i)
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (presenting) {
+      notes.push(`✓ Presenting tab "${WORK_TAB_TITLE}" (auto-selected by Chrome flag).`);
+      return true;
+    }
+
+    // Check for specific error states
+    if (await shareFail.isVisible().catch(() => false)) {
+      await clickNamed(page, /^ok$/i, 2000);
+      notes.push("Meet said 'Can't share your screen' — likely TCC permission issue on macOS.");
+      if (tcc.hint) notes.push(tcc.hint);
+      return false;
+    }
+
+    // Check if the picker is still showing (user needs to click)
+    const pickerVisible = await page.locator('[role="dialog"]').first().isVisible().catch(() => false);
+    if (pickerVisible) {
+      notes.push(
+        `Present picker still visible — Chrome should auto-select "${WORK_TAB_TITLE}".\n` +
+        `If not auto-selected: look for the tab titled "${WORK_TAB_TITLE}" and click Share.`,
+      );
+    }
+    return false;
+  };
+
+  // Try up to 2 times
+  if (await attempt(1)) return true;
+  await page.waitForTimeout(1000);
+  if (await attempt(2)) return true;
+
+  // Final check
   const presenting = await page
-    .getByText(/you('re| are) presenting|stop presenting|presenting to everyone/i)
+    .getByText(/you('re| are) presenting|stop presenting/i)
     .first()
     .isVisible()
     .catch(() => false);
-  if (presenting) {
-    notes.push(`Presenting tab "${WORK_TAB_TITLE}" (Chrome auto-selected).`);
-    return true;
-  }
-  notes.push(
-    `Present picker may still be up — Chrome should auto-pick "${WORK_TAB_TITLE}". Click Share if needed.`,
-  );
-  return false;
+  return presenting;
 }
 
 export async function presentLiveViewInMeet(opts: {
@@ -356,7 +490,7 @@ export async function presentLiveViewInMeet(opts: {
   liveViewUrl: string;
 }): Promise<MeetPresentResult> {
   const notes: string[] = [];
-  const context = await launchMeetChrome();
+  const context = await launchMeetChrome({ purpose: "present" });
 
   await context.grantPermissions(["camera", "microphone", "notifications"], {
     origin: "https://meet.google.com",
@@ -382,7 +516,9 @@ export async function presentLiveViewInMeet(opts: {
   return { joined, presented, notes };
 }
 
+export const DEFAULT_MEET_URL = "https://meet.google.com/vhz-nzug-ich";
+
 export function resolveMeetUrl(override?: string): string | undefined {
-  const raw = override?.trim() || envOptional("MEET_URL");
+  const raw = override?.trim() || envOptional("MEET_URL") || DEFAULT_MEET_URL;
   return raw && raw.length > 0 ? raw : undefined;
 }

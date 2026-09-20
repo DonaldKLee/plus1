@@ -49,6 +49,8 @@ export interface ChatMessage {
   tool?: string;
   quote?: QuoteResult;
   pdfUrl?: string;
+  /** Publicly reachable link, when the backend has public sharing configured. */
+  shareUrl?: string;
   nextStep?: NextStep;
   at: string;
 }

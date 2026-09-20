@@ -30,6 +30,8 @@
   /* inverted pair — primary buttons, the console screenshot frame */
   --inverse-bg: #09090b;
   --inverse-fg: #fafafa;
+  /* Primary hover lifts the ink; an opacity fade would wash it into the page. */
+  --inverse-bg-hover: #26262b;
 
   --brand: #ffb224;
   --brand-text: #855000;
@@ -46,6 +48,14 @@
 
   /* Solid, not a tint: a translucent brand ring composites to ~1.5:1 on white. */
   --ring: #8a5200;
+
+  /* Elevation. Light UIs carry depth in hairline + short shadow, never a halo:
+     each step has a real y-offset and a soft blur, stacked over a 1px edge. */
+  --shadow-sm: 0 1px 2px rgba(9, 9, 11, 0.05);
+  --shadow: 0 1px 2px rgba(9, 9, 11, 0.04), 0 2px 6px rgba(9, 9, 11, 0.04);
+  --shadow-lg: 0 1px 2px rgba(9, 9, 11, 0.04), 0 8px 24px -6px rgba(9, 9, 11, 0.10);
+  /* The one lifted surface: the join panel. */
+  --shadow-key: 0 1px 2px rgba(9, 9, 11, 0.05), 0 12px 32px -10px rgba(9, 9, 11, 0.16);
 }
 
 .theme-dark {
@@ -65,6 +75,7 @@
 
   --inverse-bg: #fafafa;
   --inverse-fg: #09090b;
+  --inverse-bg-hover: #ffffff;
 
   --brand: #ffb224;
   --brand-text: #ffc04d;
@@ -74,6 +85,12 @@
   --think: #a78bfa;
   --act: #4cc2ff;
   --alert: #ff6369;
+
+  /* On near-black, shadows read as nothing; depth comes from the border ramp. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 32px -8px rgba(0, 0, 0, 0.6);
+  --shadow-key: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
 }
 
 @theme inline {
@@ -205,6 +222,7 @@ a {
 .dot-pulse {
   animation: dotpulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
 @keyframes dotpulse {
   0%,
   100% {
@@ -359,6 +377,32 @@ a {
   from {
     opacity: 0;
     transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Emoji pop: rises and fades out */
+.emoji-pop {
+  animation: emojipop 1.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes emojipop {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(0) scale(0.4); }
+  18%  { opacity: 1; transform: translateX(-50%) translateY(-8px) scale(1.15); }
+  55%  { opacity: 1; transform: translateX(-50%) translateY(-14px) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-22px) scale(0.85); }
+}
+
+/* Page-level fade-in for route transitions */
+.page-enter {
+  animation: pagefadein 0.22s ease both;
+}
+@keyframes pagefadein {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
   }
   to {
     opacity: 1;

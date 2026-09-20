@@ -11,7 +11,6 @@ import {
   decideAction,
   emptyState,
   plus1_NAME,
-  narrateToolResult,
   recordCompletedAction,
   type MeetingState,
   type ToolAccess,
@@ -29,6 +28,7 @@ export interface ChatMessage {
   tool?: string; // tool name, when kind === "tool" | "quote"
   quote?: QuoteResult; // structured estimate, when kind === "quote"
   pdfUrl?: string; // downloadable quote PDF (relative path)
+  shareUrl?: string; // public link, when public sharing is configured
   nextStep?: NextStep; // broker handoff
   at: string;
 }
@@ -70,7 +70,16 @@ function toolAccessOf(c?: SessionConfig): ToolAccess {
     : c?.localAccess === "write"
       ? "write"
       : "read";
-  return { federato: servers?.federato !== false, intact: servers?.intact === true, files };
+  return {
+    federato: servers?.federato !== false,
+    intact: servers?.intact === true,
+    files,
+    email: servers?.email === true,
+    docs: servers?.docs === true,
+    browser: true,
+    // Default to requiring approval: an unset guardrail must not mean "just send it".
+    sendApproval: c?.guardrails?.sendApproval !== false,
+  };
 }
 
 function msg(role: ChatMessage["role"], text: string, kind: ChatMessage["kind"] = "text", tool?: string): ChatMessage {
@@ -182,14 +191,19 @@ export async function sendChatMessage(
         announce: async (say) => { out.push(msg("bob", say)); },
         onResult: (step) => {
           recordCompletedAction(c.state, `${step.call.name}(${step.args}) → ${step.result.text.slice(0, 160)}`);
-          if (step.result.quote) {
-            const m = msg("bob", step.result.text, "quote", step.call.name);
-            m.quote = step.result.quote;
-            out.push(m);
+          const { quote, pdfUrl, shareUrl, nextStep, trace } = step.result;
+          let m: ChatMessage;
+          if (quote) {
+            m = msg("bob", step.result.text, "quote", step.call.name);
+            m.quote = quote;
           } else {
-            const shown = step.result.trace?.length ? `${step.result.text}\n\n— how: ${step.result.trace.join(" · ")}` : step.result.text;
-            out.push(msg("bob", shown, "tool", step.call.name));
+            const shown = trace?.length ? `${step.result.text}\n\n— how: ${trace.join(" · ")}` : step.result.text;
+            m = msg("bob", shown, "tool", step.call.name);
           }
+          if (pdfUrl) m.pdfUrl = pdfUrl;
+          if (shareUrl) m.shareUrl = shareUrl;
+          if (nextStep) m.nextStep = nextStep;
+          out.push(m);
           remember(c, step.reply.remember);
           applyStateUpdate(c.state, step.reply.state);
         },

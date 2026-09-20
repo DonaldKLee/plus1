@@ -94,21 +94,26 @@ const SESSIONS = [
 const TILT = 20 * DEG;
 const AUTO_SPIN = 0.0022;
 
+const POP_EMOJIS = ["🚀", "📈", "👋", "✅", "🔥", "⭐", "💻", "📞", "📱"];
+const POP_LIFETIME_MS = 1400;
+
+type EmojiPop = { id: number; x: number; y: number; emoji: string };
+
 function cssVar(el: HTMLElement, name: string, fallback: string) {
   const v = getComputedStyle(el).getPropertyValue(name).trim();
   return v || fallback;
 }
 
+let popId = 0;
+
 export function WorldMap() {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [count, setCount] = useState(1284);
-  const [hovered, setHovered] = useState<{
-    i: number;
-    x: number;
-    y: number;
-  } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [pops, setPops] = useState<EmojiPop[]>([]);
+  // Live projected positions updated each frame
+  const sessionPos = useRef<{ x: number; y: number; depth: number }[]>([]);
 
   // Mutable animation state — deliberately outside React so the frame loop
   // never queues a render.
@@ -126,6 +131,58 @@ export function WorldMap() {
       2600,
     );
     return () => clearInterval(id);
+  }, []);
+
+  // Spawn emoji pops at random land points visible on the globe
+  useEffect(() => {
+    const spawnOne = () => {
+      const s = state.current;
+      const sinY = Math.sin(s.yaw), cosY = Math.cos(s.yaw);
+      const sinT = Math.sin(s.tilt), cosT = Math.cos(s.tilt);
+      const host = wrap.current;
+      if (!host) return;
+      const size = host.clientWidth;
+      const R = size * 0.44, cx = size / 2, cy = size / 2;
+
+      // Pick random visible land points for natural globe coverage
+      const candidates = LAND_POINTS.filter((p) => {
+        const x1 = p.x * cosY + p.z * sinY;
+        const z1 = -p.x * sinY + p.z * cosY;
+        const z2 = p.y * sinT + z1 * cosT;
+        return z2 > 0.2;
+      });
+      if (!candidates.length) return;
+      const p = candidates[Math.floor(Math.random() * candidates.length)];
+      const x1 = p.x * cosY + p.z * sinY;
+      const z1 = -p.x * sinY + p.z * cosY;
+      const y2 = p.y * cosT - z1 * sinT;
+      const z2 = p.y * sinT + z1 * cosT;
+      const sx = cx + R * x1;
+      const sy = cy - R * y2;
+      // Small jitter so stacked pops spread a bit
+      const jx = (Math.random() - 0.5) * 18;
+      const jy = (Math.random() - 0.5) * 18;
+
+      const emoji = POP_EMOJIS[Math.floor(Math.random() * POP_EMOJIS.length)];
+      const newPop: EmojiPop = { id: popId++, x: sx + jx, y: sy + jy, emoji };
+      setPops((cur) => [...cur.slice(-12), newPop]);
+      setTimeout(() => {
+        setPops((cur) => cur.filter((p) => p.id !== newPop.id));
+      }, POP_LIFETIME_MS);
+    };
+
+    // Stagger multiple simultaneous spawners so pops feel continuous
+    const timers: ReturnType<typeof setInterval>[] = [];
+    for (let i = 0; i < 3; i++) {
+      const offset = i * 520;
+      const t = setTimeout(() => {
+        spawnOne();
+        const id = setInterval(spawnOne, 900 + Math.random() * 600);
+        timers.push(id);
+      }, offset);
+      timers.push(t as unknown as ReturnType<typeof setInterval>);
+    }
+    return () => timers.forEach(clearInterval);
   }, []);
 
   useEffect(() => {
@@ -167,7 +224,6 @@ export function WorldMap() {
       const cy = size / 2;
 
       const land = cssVar(cv, "--fg", "#09090b");
-      const brand = cssVar(cv, "--brand", "#ffb224");
 
       ctx.clearRect(0, 0, size, size);
 
@@ -210,50 +266,17 @@ export function WorldMap() {
 
       // session nodes
       const hits: { i: number; sx: number; sy: number }[] = [];
+      const newPos: { x: number; y: number; depth: number }[] = [];
       SESSIONS.forEach((sess, i) => {
         const { sx, sy, depth } = project(sess.v);
+        newPos.push({ x: sx, y: sy, depth });
         if (depth <= 0.04) return;
         hits.push({ i, sx, sy });
 
-        const isHot =
-          s.pointer != null &&
-          Math.hypot(sx - s.pointer.x, sy - s.pointer.y) < 16;
-
-        const pulse = 0.5 + 0.5 * Math.sin(t / 26 + i * 1.7);
-        ctx.globalAlpha = (0.16 + depth * 0.2) * (1 - pulse * 0.55);
-        ctx.fillStyle = brand;
-        ctx.beginPath();
-        ctx.arc(sx, sy, 3 + pulse * 11, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.globalAlpha = Math.min(0.45 + depth * 0.6, 1);
-        ctx.beginPath();
-        ctx.arc(sx, sy, isHot ? 5.4 : 3.1, 0, Math.PI * 2);
-        ctx.fill();
       });
 
       ctx.globalAlpha = 1;
-
-      // hover resolution runs on the frame so it follows the spin
-      if (s.pointer && !s.drag) {
-        let best: { i: number; sx: number; sy: number } | null = null;
-        let bestD = 18;
-        for (const h of hits) {
-          const d = Math.hypot(h.sx - s.pointer.x, h.sy - s.pointer.y);
-          if (d < bestD) {
-            bestD = d;
-            best = h;
-          }
-        }
-        setHovered((cur) => {
-          if (!best) return cur === null ? cur : null;
-          if (cur && cur.i === best.i && Math.abs(cur.x - best.sx) < 1.5)
-            return cur;
-          return { i: best.i, x: best.sx, y: best.sy };
-        });
-      } else if (!s.pointer) {
-        setHovered((cur) => (cur === null ? cur : null));
-      }
+      sessionPos.current = newPos;
 
       raf = requestAnimationFrame(draw);
     };
@@ -323,11 +346,9 @@ export function WorldMap() {
     }
   }, []);
 
-  const hot = hovered ? SESSIONS[hovered.i] : null;
-
   return (
     <figure className="m-0">
-      <div ref={wrap} className="relative mx-auto w-full max-w-[460px]">
+      <div ref={wrap} className="relative mx-auto w-full max-w-[580px]">
         <canvas
           ref={canvas}
           onPointerDown={onPointerDown}
@@ -343,18 +364,27 @@ export function WorldMap() {
           role="img"
           aria-label="An interactive globe showing illustrative live plus1 sessions in eight cities. Drag or use the arrow keys to rotate it."
           className="w-full touch-none select-none rounded-full outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--ring)]"
-          style={{ cursor: dragging ? "grabbing" : hot ? "pointer" : "grab" }}
+          style={{ cursor: dragging ? "grabbing" : "grab" }}
         />
 
-        {hot && hovered && (
+        {pops.map((pop) => (
           <div
-            className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-[calc(100%+12px)] whitespace-nowrap rounded-[var(--r-sm)] border border-border bg-bg px-2.5 py-1.5 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.25)]"
-            style={{ left: hovered.x, top: hovered.y }}
+            key={pop.id}
+            className="pointer-events-none absolute z-20 -translate-x-1/2 emoji-pop"
+            style={{ left: pop.x, top: pop.y }}
+            aria-hidden="true"
           >
-            <p className="text-[12.5px] font-medium text-fg">{hot.city}</p>
-            <p className="text-[11.5px] text-fg-muted">{hot.note}</p>
+            <div className="flex flex-col items-center gap-0.5">
+              <div className="rounded-[var(--r-sm)] border border-border bg-bg px-2 py-1.5 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.18)]">
+                <span className="block text-[20px] leading-none">{pop.emoji}</span>
+              </div>
+              {/* little tail */}
+              <div className="h-1.5 w-px bg-border" />
+              <div className="h-1 w-1 rounded-full bg-border" />
+            </div>
           </div>
-        )}
+        ))}
+
       </div>
 
       {/* The globe's content, for anyone who cannot see or drag it. */}
@@ -365,24 +395,6 @@ export function WorldMap() {
           </li>
         ))}
       </ul>
-
-      <figcaption className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-4">
-        <span className="flex items-center gap-2">
-          <span
-            className="dot dot-pulse"
-            style={{ color: "var(--brand-text)" }}
-          />
-          <span className="tnum text-[13px] font-medium text-fg">
-            {count.toLocaleString()}
-          </span>
-        </span>
-        <span className="text-[13px] text-fg-muted">
-          meetings a plus1 has sat in on
-        </span>
-        <span className="ml-auto text-[12px] text-fg-subtle">
-          Drag to spin · illustrative data
-        </span>
-      </figcaption>
     </figure>
   );
 }

@@ -12,7 +12,7 @@ import {
 
 /* --------------------------------------------------------------- model ---- */
 
-type ServerId = "federato" | "intact" | "local";
+type ServerId = "federato" | "intact" | "local" | "docs" | "email";
 type AccessLevel = "read" | "write";
 
 interface Config {
@@ -35,7 +35,9 @@ const DEFAULT_CONFIG: Config = {
   honk: true,
   monologueMin: 3,
   guardrails: { sendApproval: true, noComp: true, noDeadlines: false },
-  servers: { federato: true, intact: false, local: false },
+  // Documents are harmless (a PDF in memory); email leaves the building, so it
+  // starts off and stays behind the sendApproval guardrail.
+  servers: { federato: true, intact: false, local: false, docs: true, email: false },
   localAccess: "read",
 };
 
@@ -84,6 +86,19 @@ const SERVERS: { id: ServerId; name: string; monogram: string; summary: string }
     name: "Local access",
     monogram: "L",
     summary: "Read and write files on this machine, scoped to the working directory.",
+  },
+  {
+    id: "docs",
+    name: "Documents",
+    monogram: "D",
+    summary: "Write meeting notes, recaps and action items into a real PDF you can download or have emailed.",
+  },
+  {
+    id: "email",
+    name: "Email",
+    monogram: "E",
+    summary:
+      "Send email over SMTP, with a generated PDF attached. Needs GMAIL_USER + GMAIL_APP_PASSWORD (or the SMTP_* vars) in .env — without them the plus1 drafts but nothing goes out.",
   },
 ];
 
@@ -275,8 +290,8 @@ function behaviorSentence(c: Config): string {
         ? "answers when asked and offers to help with the work"
         : "jumps in, drafts, and does the work as the meeting runs";
   const care = `asks before acting when it's under ${c.confidence}% sure`;
-  const honk = c.honk ? `, and honks on disagreement or a monologue past ${c.monologueMin} min` : "";
-  return `${name} ${stance} — it ${care}${honk}.`;
+  const honk = c.honk ? `, and chimes in on disagreement or a monologue past ${c.monologueMin} min` : "";
+  return `${name} ${stance}. It ${care}${honk}.`;
 }
 
 /* -------------------------------------------------------------- screen ---- */
@@ -367,7 +382,7 @@ export function Plus1Config() {
   return (
     <div className="flex flex-col gap-6">
       {(saved || live) && (
-        <div className="rise-in fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-[var(--r-sm)] border border-border bg-bg-subtle px-3 py-2 text-[12.5px] text-fg-muted shadow-sm">
+        <div className="rise-in fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-[var(--r-sm)] border border-border bg-bg-subtle px-3 py-2 text-[12.5px] text-fg-muted shadow-[var(--shadow-lg)]">
           <Dot color="var(--live)" pulse={live} />
           {live ? "Applied to live meeting" : remote ? "Saved to MongoDB" : "Saved in this browser"}
         </div>
@@ -377,8 +392,7 @@ export function Plus1Config() {
       <div className="flex items-start gap-3 rounded-[var(--r)] border border-border bg-bg-subtle p-4">
         <Plus1Mark size={26} className="mt-0.5 shrink-0 text-fg" />
         <div className="min-w-0">
-          <span className="eyebrow">How it behaves</span>
-          <p className="mt-1 text-[15px] leading-relaxed text-fg">{sentence}</p>
+          <p className="text-[15px] leading-relaxed text-fg">{sentence}</p>
         </div>
       </div>
 
@@ -400,7 +414,7 @@ export function Plus1Config() {
             </p>
           </label>
           <div>
-            <span className="eyebrow mb-1.5 block">In the call</span>
+            <span className="mb-1.5 block text-[13px] font-medium text-fg">In the call</span>
             <div className="flex items-center gap-2.5 rounded-[var(--r-sm)] border border-border bg-bg px-3 py-2.5">
               <Plus1Mark size={22} className="shrink-0 text-fg" />
               <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-fg">{displayName}</span>
@@ -463,7 +477,7 @@ export function Plus1Config() {
               ariaLabel="Autonomy"
             />
             <p className="mt-2 text-[12.5px] leading-relaxed text-fg-muted">
-              How far the plus1 goes on its own — from quietly capturing the meeting to drafting emails
+              How far the plus1 goes on its own: From quietly capturing the meeting to drafting emails
               and running tools as the conversation happens.
             </p>
           </div>
@@ -489,10 +503,10 @@ export function Plus1Config() {
           {/* honk */}
           <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-6">
             <div className="min-w-0">
-              <span className="text-[13px] font-medium text-fg">Honk</span>
+              <span className="text-[13px] font-medium text-fg">Challenge</span>
               <p className="mt-1 max-w-[52ch] text-[12.5px] leading-relaxed text-fg-muted">
-                The plus1 honks on disagreement, on a long monologue, and any time someone types
-                <span className="tnum"> /honk</span> in the chat.
+                The plus1 chimes in on disagreement, on a long monologue, and any time someone types
+                <span className="tnum"> /challenge</span> in the chat.
               </p>
             </div>
             <div className="flex items-center gap-4">
@@ -559,7 +573,7 @@ export function Plus1Config() {
                     <p className="mt-1 max-w-[62ch] text-[13px] leading-relaxed text-fg-muted">{s.summary}</p>
                     {s.id === "local" && on && (
                       <div className="rise-in mt-3 flex flex-wrap items-center gap-3">
-                        <span className="eyebrow">Access</span>
+                        <span className="text-[12.5px] font-medium text-fg-muted">Access</span>
                         <Segmented value={config.localAccess} onChange={(n) => set("localAccess", n)} />
                         <span className="text-[12px] text-fg-subtle">
                           {config.localAccess === "write"

@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Input, Panel, PanelHead, cx } from "@/components/ui";
 import { Check, Close, Alert } from "@/components/icons";
+import {
+  WorkCamModeToggle,
+  fetchWorkCamMode,
+  saveWorkCamMode,
+  type WorkCamMode,
+} from "@/components/dash/WorkCamConfig";
 
 const AGENT =
   process.env.NEXT_PUBLIC_BACKEND_URL ??
@@ -88,8 +94,10 @@ export function Underwrite() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<number | null>(1001);
-  const [meetUrl, setMeetUrl] = useState("");
+  const [meetUrl, setMeetUrl] = useState("https://meet.google.com/vhz-nzug-ich");
   const [meetNotes, setMeetNotes] = useState<string[] | null>(null);
+  const [workCamMode, setWorkCamMode] = useState<WorkCamMode>("local");
+  const [workCamId, setWorkCamId] = useState<string | null>(null);
 
   const loadRank = useCallback(async (refresh = false) => {
     setLoading(true);
@@ -154,34 +162,71 @@ export function Underwrite() {
     setErr(null);
     setMeetNotes(null);
     try {
-      const res = await fetch(`${AGENT}/api/federato/present-meet`, {
+      const url = meetUrl.trim();
+      if (!url) throw new Error("Paste a Google Meet link first");
+
+      const SUGGESTED =
+        'Go to maps.google.com, search "Waterloo, Ontario", switch to Satellite, zoom into the University of Waterloo campus, then pan around the main buildings for a bit.';
+
+      const res = await fetch(`${AGENT}/api/work-cam/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          policyId: selected ?? 1001,
-          meetUrl: meetUrl.trim() || undefined,
+          meetUrl: url,
+          mode: workCamMode,
+          task: SUGGESTED,
+          displayName: "plus1 work",
         }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? res.statusText);
-      setDive({ deepDive: body.deepDive, browse: body.browse, hops: [] });
-      if (Array.isArray(body.meet?.notes)) setMeetNotes(body.meet.notes);
+      setWorkCamId(typeof body.id === "string" ? body.id : null);
+      if (Array.isArray(body.notes)) setMeetNotes(body.notes);
+      if (body.workLiveViewUrl) {
+        window.open(body.workLiveViewUrl, "_blank", "noopener,noreferrer");
+      } else if (body.liveViewUrl) {
+        window.open(body.liveViewUrl, "_blank", "noopener,noreferrer");
+      }
+      if (body.status === "error") {
+        throw new Error(body.notes?.slice(-1)?.[0] ?? "Work-cam failed");
+      }
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [selected, meetUrl]);
+  }, [meetUrl, workCamMode]);
+
+  const stopWorkCam = useCallback(async () => {
+    if (!workCamId) return;
+    setLoading(true);
+    try {
+      await fetch(`${AGENT}/api/work-cam/sessions/${workCamId}/stop`, { method: "POST" });
+      setWorkCamId(null);
+      setMeetNotes((n) => (n ? [...n, "Stopped."] : ["Stopped."]));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [workCamId]);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem("plus1.meetUrl");
       if (saved) setMeetUrl(saved);
+      else setMeetUrl("https://meet.google.com/vhz-nzug-ich");
     } catch {
       /* ignore */
     }
+    void fetchWorkCamMode().then(setWorkCamMode);
     void loadRank(false);
   }, [loadRank]);
+
+  const onModeChange = (m: WorkCamMode) => {
+    setWorkCamMode(m);
+    void saveWorkCamMode(m);
+  };
 
   const hops = dive?.hops?.length ? dive.hops : rank?.hops;
 
@@ -213,6 +258,7 @@ export function Underwrite() {
         </p>
 
         <div className="flex flex-wrap items-center gap-2">
+          <WorkCamModeToggle mode={workCamMode} onChange={onModeChange} />
           <Input
             type="url"
             value={meetUrl}
@@ -234,8 +280,13 @@ export function Underwrite() {
             onClick={() => void joinAndPresent()}
             disabled={loading}
           >
-            Join Meet &amp; present
+            {workCamMode === "local" ? "Join & Present" : "Join & stream cam"}
           </Button>
+          {workCamId && (
+            <Button size="sm" onClick={() => void stopWorkCam()} disabled={loading}>
+              Stop work-cam
+            </Button>
+          )}
         </div>
       </section>
 
@@ -267,7 +318,7 @@ export function Underwrite() {
 
       {meetNotes && meetNotes.length > 0 && (
         <div className="rounded-[var(--r)] border border-border bg-bg-subtle px-4 py-3">
-          <p className="eyebrow mb-1.5">Presented in Meet</p>
+          <p className="mb-1.5 text-[12.5px] font-medium text-fg-muted">Presented in Meet</p>
           <ul className="flex flex-col gap-1">
             {meetNotes.map((n) => (
               <li key={n} className="text-[12.5px] text-fg-muted">
@@ -441,7 +492,7 @@ export function Underwrite() {
 
                   {dive.browse && (
                     <div className="mt-4 rounded-[var(--r-sm)] border border-border p-3">
-                      <p className="eyebrow mb-1.5">Browserbase</p>
+                      <p className="mb-1.5 text-[12.5px] font-medium text-fg-muted">Browserbase</p>
                       <p className="tnum text-[12px] text-fg-muted">
                         {dive.browse.status} · {dive.browse.sessionId}
                       </p>

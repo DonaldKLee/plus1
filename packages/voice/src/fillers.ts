@@ -9,13 +9,22 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { liveAvatarPcmToWav, wavToLiveAvatarPcm, type TextToSpeech } from "@plus1/liveavatar";
 
-export type FillerKind = "ack" | "checking" | "wait" | "unsure";
+export type FillerKind = "ack" | "checking" | "wait" | "unsure" | "thinking" | "loading";
 
 export const DEFAULT_FILLERS: Record<FillerKind, string[]> = {
   ack: ["on it.", "yep, on it.", "sure, doing that now."],
   checking: ["mm, let me check.", "one sec, looking.", "give me a second."],
   wait: ["one sec.", "hang on.", "almost there."],
   unsure: ["hm, not sure. let me look.", "i might be wrong here, checking."],
+  // Spoken while a long tool (screenshare / jev) is in flight. Keep them tiny —
+  // these are the "um" / "still loading" beats a person actually makes on a call.
+  thinking: ["um...", "uh...", "hmm...", "tt, hang on."],
+  loading: [
+    "just waiting for this to load.",
+    "still loading, one sec.",
+    "this is taking a beat.",
+    "hang on, page's coming up.",
+  ],
 };
 
 export interface FillerCacheOptions {

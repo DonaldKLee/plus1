@@ -65,7 +65,7 @@ function resolveModelConfig():
   const openai = envOptional("OPENAI_API_KEY");
   if (openai) return { modelName: "openai/gpt-4o-mini", apiKey: openai };
   const google = envOptional("GOOGLE_API_KEY");
-  if (google) return { modelName: "google/gemini-2.0-flash", apiKey: google };
+  if (google) return { modelName: "google/gemini-3.6-flash", apiKey: google };
   const anthropic = envOptional("ANTHROPIC_API_KEY");
   if (anthropic)
     return { modelName: "anthropic/claude-haiku-4-5", apiKey: anthropic };

@@ -24,8 +24,8 @@ import {
 } from "@/lib/session";
 
 const STATUS_COLOR: Record<SessionStatus, string> = {
-  joining: "var(--brand)",
-  "waiting-admit": "var(--brand)",
+  joining: "var(--brand-text)",
+  "waiting-admit": "var(--brand-text)",
   listening: "var(--live)",
   ended: "var(--fg-subtle)",
   error: "var(--alert)",
@@ -36,7 +36,7 @@ const ACTION_META: Record<
   { label: string; color: string }
 > = {
   speak: { label: "Speak", color: "var(--act, #4ade80)" },
-  chat: { label: "Chat", color: "var(--brand)" },
+  chat: { label: "Chat", color: "var(--brand-text)" },
   tool: { label: "Tool", color: "#c084fc" },
   none: { label: "Hold", color: "var(--fg-subtle)" },
 };
@@ -253,7 +253,7 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid grid-cols-1 gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_320px]">
         {/* Transcript */}
         <Panel as="section" className="flex min-h-0 flex-col overflow-hidden">
           <PanelHead
@@ -298,7 +298,7 @@ export function LiveTranscript({ sessionId }: { sessionId: string }) {
                 </span>
                 <p
                   className="text-[13.5px] leading-relaxed"
-                  style={{ color: l.agent ? "var(--brand)" : "var(--fg)" }}
+                  style={{ color: l.agent ? "var(--brand-text)" : "var(--fg)" }}
                 >
                   {l.agent && <span className="mr-1.5 font-medium">{l.speaker ?? "plus1"}:</span>}
                   {l.text}

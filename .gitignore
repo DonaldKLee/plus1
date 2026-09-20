@@ -6,7 +6,6 @@ dist/
 .next/
 .DS_Store
 .cache/
-apps/backend/cache/
 *.log
 .turbo/
 .env.*
@@ -20,3 +19,6 @@ plus1-files/
 goose-files/
 Federato_HTN2026_API_Challenge_Docs
 cache
+
+apps/backend/output/
+apps/backend/.profile/

@@ -67,7 +67,7 @@ export async function deepDivePolicy(
       zip: preferred.zip ?? null, county: preferred.county ?? null, state: preferred.state,
       latitude: preferred.latitude ?? null, longitude: preferred.longitude ?? null,
     });
-    hops.push({ stage: "ENRICH", ms: Date.now() - t0, detail: `${enrichment.sources.length}/3 sources answered (${Date.now() - tE}ms)` });
+    hops.push({ stage: "ENRICH", ms: Date.now() - t0, detail: `${enrichment.sources.length}/6 sources answered (${Date.now() - tE}ms)` });
   }
   const scored = enrichment ? scorePolicyAppetite(input, { enrichment }) : base;
   hops.push({ stage: "SCORE", ms: Date.now() - t0, detail: enrichment ? `${scored.decision} (rules alone: ${base.decision})` : scored.decision });

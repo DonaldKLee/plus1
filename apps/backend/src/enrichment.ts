@@ -1,20 +1,28 @@
 /**
- * External risk enrichment for a Federato location (the "bonus" milestone, done properly):
- *   - OpenFEMA DisasterDeclarationsSummaries: how often the county has been in a federal
- *     disaster declaration since 2015, and for what (hurricane, flood, fire…).
- *   - OpenFEMA NFIP claims (v2): how many flood-insurance claims that zip has ever filed.
- *   - Open-Meteo archive: last full year's wettest day and strongest gust at the coordinates.
- * All three are free, keyless, and every location in the dataset has county + lat/lng.
- * Failures degrade to nulls (scored as "missing", never as a fail) and are cached per
- * location on disk so ranking the whole book costs the network once.
+ * External risk enrichment for a Federato location — a wealth of free, keyless sources:
+ *   - FEMA National Risk Index (ArcGIS): the county's composite risk rating and per-peril ratings.
+ *   - OpenFEMA DisasterDeclarationsSummaries: federal disaster declarations for the county since 2015.
+ *   - OpenFEMA NFIP claims (v2): flood-insurance claims ever filed in the zip.
+ *   - USGS earthquake catalog: M4.5+ events within 150 km since 2000.
+ *   - Open-Meteo archive: five years of daily extremes (gust, rain, heat) at the coordinates.
+ *   - OpenStreetMap Nominatim reverse geocoding: do the coordinates really fall in the county on file?
+ * Every location in the dataset has county + lat/lng, so all six apply.
+ * Failures degrade to nulls (scored as "missing", never as a fail). Lookups are remembered per
+ * location in the OS temp dir (disposable; nothing lands in the repo) so ranking the whole book
+ * costs the network once.
  */
 import fs from "node:fs";
 import path from "node:path";
-import type { HazardEnrichment } from "@plus1/brain";
-import { CACHE_DIR, ensureCacheDir } from "./env.js";
+import { emptyEnrichment, type HazardEnrichment } from "@plus1/brain";
+import { STATE_DIR, ensureDir } from "./env.js";
 
 const OPENFEMA = "https://www.fema.gov/api/open";
 const OPEN_METEO = "https://archive-api.open-meteo.com/v1/archive";
+const USGS = "https://earthquake.usgs.gov/fdsnws/event/1/count";
+const NRI = "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Counties/FeatureServer/0/query";
+const NOMINATIM = "https://nominatim.openstreetmap.org/reverse";
+const UA = "plus1-underwriting-agent/0.1 (hackthenorth; contact: team)";
+const WEATHER_YEARS = 5;
 const TIMEOUT_MS = 9_000;
 const CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
 
@@ -29,7 +37,7 @@ export interface LocationLike {
 
 interface CacheEntry { at: number; data: HazardEnrichment }
 let cache: Record<string, CacheEntry> | null = null;
-const cachePath = () => path.join(CACHE_DIR, "enrichment.json");
+const cachePath = () => path.join(STATE_DIR, "enrichment.json");
 
 function loadCache(): Record<string, CacheEntry> {
   if (cache) return cache;
@@ -38,7 +46,7 @@ function loadCache(): Record<string, CacheEntry> {
   return cache;
 }
 function saveCache(): void {
-  try { ensureCacheDir(); fs.writeFileSync(cachePath(), JSON.stringify(cache ?? {}, null, 1)); } catch { /* best effort */ }
+  try { ensureDir(STATE_DIR); fs.writeFileSync(cachePath(), JSON.stringify(cache ?? {}, null, 1)); } catch { /* best effort */ }
 }
 
 function keyOf(loc: LocationLike): string {
@@ -77,13 +85,61 @@ async function nfipClaims(zip: string): Promise<number> {
   return json.metadata.count;
 }
 
-/** Last full calendar year's daily extremes at the coordinates. */
-async function weatherExtremes(lat: number, lng: number): Promise<{ maxDailyPrecipMm: number | null; maxGustKmh: number | null }> {
-  const year = new Date().getUTCFullYear() - 1;
-  const url = `${OPEN_METEO}?latitude=${lat}&longitude=${lng}&start_date=${year}-01-01&end_date=${year}-12-31&daily=precipitation_sum,wind_gusts_10m_max&timezone=auto`;
-  const json = (await getJson(url)) as { daily?: { precipitation_sum?: (number | null)[]; wind_gusts_10m_max?: (number | null)[] } };
-  const max = (xs?: (number | null)[]) => { const v = (xs ?? []).filter((x): x is number => typeof x === "number"); return v.length ? Math.max(...v) : null; };
-  return { maxDailyPrecipMm: max(json.daily?.precipitation_sum), maxGustKmh: max(json.daily?.wind_gusts_10m_max) };
+/** Five full calendar years of daily extremes at the coordinates. */
+async function weatherExtremes(lat: number, lng: number): Promise<{ maxDailyPrecipMm: number | null; maxGustKmh: number | null; hotDays: number | null }> {
+  const end = new Date().getUTCFullYear() - 1;
+  const start = end - WEATHER_YEARS + 1;
+  const url = `${OPEN_METEO}?latitude=${lat}&longitude=${lng}&start_date=${start}-01-01&end_date=${end}-12-31&daily=precipitation_sum,wind_gusts_10m_max,temperature_2m_max&timezone=auto`;
+  const json = (await getJson(url)) as { daily?: { precipitation_sum?: (number | null)[]; wind_gusts_10m_max?: (number | null)[]; temperature_2m_max?: (number | null)[] } };
+  const nums = (xs?: (number | null)[]) => (xs ?? []).filter((x): x is number => typeof x === "number");
+  const max = (xs?: (number | null)[]) => { const v = nums(xs); return v.length ? Math.max(...v) : null; };
+  const hot = nums(json.daily?.temperature_2m_max);
+  return { maxDailyPrecipMm: max(json.daily?.precipitation_sum), maxGustKmh: max(json.daily?.wind_gusts_10m_max), hotDays: hot.length ? hot.filter((t) => t > 35).length : null };
+}
+
+/** USGS: significant earthquakes near the coordinates this century. */
+async function quakes(lat: number, lng: number): Promise<number> {
+  const json = (await getJson(`${USGS}?format=geojson&latitude=${lat}&longitude=${lng}&maxradiuskm=150&minmagnitude=4.5&starttime=2000-01-01`)) as { count?: number };
+  if (typeof json.count !== "number") throw new Error("no count");
+  return json.count;
+}
+
+/** FEMA National Risk Index for the county. */
+async function nationalRiskIndex(state: string, county: string): Promise<NonNullable<HazardEnrichment["nri"]>> {
+  const c = county.replace(/ County$/i, "").replace(/'/g, "''");
+  const where = encodeURIComponent(`STATEABBRV='${state}' AND COUNTY='${c}'`);
+  const fields = "RISK_SCORE,RISK_RATNG,EAL_RATNG,CFLD_RISKR,IFLD_RISKR,ERQK_RISKR,HRCN_RISKR,TRND_RISKR,WFIR_RISKR,HAIL_RISKR,SWND_RISKR,WNTW_RISKR";
+  const json = (await getJson(`${NRI}?where=${where}&outFields=${fields}&returnGeometry=false&f=json`)) as { features?: { attributes?: Record<string, unknown> }[]; error?: unknown };
+  const a = json.features?.[0]?.attributes;
+  if (!a) throw new Error("county not in NRI");
+  const str = (k: string) => (typeof a[k] === "string" && a[k] ? (a[k] as string) : null);
+  const perils: Record<string, string> = {};
+  for (const [k, name] of [["CFLD_RISKR", "coastal_flood"], ["IFLD_RISKR", "inland_flood"], ["ERQK_RISKR", "earthquake"], ["HRCN_RISKR", "hurricane"], ["TRND_RISKR", "tornado"], ["WFIR_RISKR", "wildfire"], ["HAIL_RISKR", "hail"], ["SWND_RISKR", "strong_wind"], ["WNTW_RISKR", "winter_weather"]] as const) {
+    const v = str(k); if (v && !/not applicable|insufficient/i.test(v)) perils[name] = v;
+  }
+  return { riskScore: typeof a.RISK_SCORE === "number" ? a.RISK_SCORE : null, riskRating: str("RISK_RATNG"), expectedAnnualLossRating: str("EAL_RATNG"), perils };
+}
+
+/** Where do the coordinates really land? Compared with the county/state on the broker's file. */
+async function reverseGeocode(lat: number, lng: number, fileCounty: string | null, fileState: string | null): Promise<NonNullable<HazardEnrichment["geocode"]>> {
+  const json = (await getJson(`${NOMINATIM}?lat=${lat}&lon=${lng}&format=jsonv2&zoom=10`, { "user-agent": UA })) as { address?: { county?: string; state?: string } };
+  const county = json.address?.county ?? null;
+  const state = json.address?.state ?? null;
+  const norm = (s: string | null) => (s ?? "").toLowerCase().replace(/ county$/, "").trim();
+  const stateOk = fileState && state ? STATE_NAMES[fileState.toUpperCase()]?.toLowerCase() === state.toLowerCase() : null;
+  const countyOk = fileCounty && county ? norm(fileCounty) === norm(county) : null;
+  const matchesFile = stateOk == null && countyOk == null ? null : (stateOk ?? true) && (countyOk ?? true);
+  return { county, state, matchesFile };
+}
+
+const STATE_NAMES: Record<string, string> = { AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming", DC: "District of Columbia" };
+
+/** Nominatim asks for ≤1 request/second: serialize those calls. */
+let nominatimChain: Promise<unknown> = Promise.resolve();
+function throttledReverse(lat: number, lng: number, county: string | null, state: string | null) {
+  const run = nominatimChain.then(() => new Promise((r) => setTimeout(r, 1100))).then(() => reverseGeocode(lat, lng, county, state));
+  nominatimChain = run.catch(() => undefined);
+  return run;
 }
 
 /** Enrich one location. Never throws; each source is independent and optional. */
@@ -93,11 +149,7 @@ export async function enrichLocation(loc: LocationLike): Promise<HazardEnrichmen
   const hit = c[key];
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.data;
 
-  const out: HazardEnrichment = {
-    zip: loc.zip ?? null, county: loc.county ?? null, state: loc.state ?? null,
-    declarationsSince2015: null, declarationTypes: {}, nfipClaims: null,
-    maxDailyPrecipMm: null, maxGustKmh: null, sources: [],
-  };
+  const out: HazardEnrichment = emptyEnrichment(loc);
   const jobs: Promise<void>[] = [];
   if (loc.state && loc.county) {
     jobs.push(femaDeclarations(loc.state, loc.county).then((r) => { out.declarationsSince2015 = r.count; out.declarationTypes = r.types; out.sources.push("openfema:declarations"); }).catch(() => {}));
@@ -105,12 +157,19 @@ export async function enrichLocation(loc: LocationLike): Promise<HazardEnrichmen
   if (loc.zip) {
     jobs.push(nfipClaims(loc.zip).then((n) => { out.nfipClaims = n; out.sources.push("openfema:nfip"); }).catch(() => {}));
   }
+  if (loc.state && loc.county) {
+    jobs.push(nationalRiskIndex(loc.state, loc.county).then((n) => { out.nri = n; out.sources.push("fema:nri"); }).catch(() => {}));
+  }
   if (typeof loc.latitude === "number" && typeof loc.longitude === "number") {
-    jobs.push(weatherExtremes(loc.latitude, loc.longitude).then((w) => { out.maxDailyPrecipMm = w.maxDailyPrecipMm; out.maxGustKmh = w.maxGustKmh; out.sources.push("open-meteo"); }).catch(() => {}));
+    const { latitude: lat, longitude: lng } = loc;
+    jobs.push(weatherExtremes(lat, lng).then((w) => { out.maxDailyPrecipMm = w.maxDailyPrecipMm; out.maxGustKmh = w.maxGustKmh; out.hotDays = w.hotDays; out.sources.push("open-meteo"); }).catch(() => {}));
+    jobs.push(quakes(lat, lng).then((n) => { out.quakesSince2000 = n; out.sources.push("usgs:earthquakes"); }).catch(() => {}));
+    jobs.push(throttledReverse(lat, lng, loc.county ?? null, loc.state ?? null).then((g) => { out.geocode = g; out.sources.push("osm:reverse-geocode"); }).catch(() => {}));
   }
   await Promise.all(jobs);
   // Cache even partial answers (a dead source shouldn't be hammered), but with a short TTL.
-  c[key] = { at: out.sources.length === 3 ? Date.now() : Date.now() - CACHE_TTL_MS + 3600 * 1000, data: out };
+  const ALL_SOURCES = 6;
+  c[key] = { at: out.sources.length === ALL_SOURCES ? Date.now() : Date.now() - CACHE_TTL_MS + 3600 * 1000, data: out };
   saveCache();
   return out;
 }

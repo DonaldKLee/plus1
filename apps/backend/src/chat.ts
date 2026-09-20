@@ -130,7 +130,9 @@ export async function sendChatMessage(
   c.messages.push(msg("user", clean));
 
   const access = toolAccessOf(c.config);
-  const decision = await decideAction(transcriptOf(c), {
+  let decision: Awaited<ReturnType<typeof decideAction>>;
+  try {
+    decision = await decideAction(transcriptOf(c), {
     channel: "chat",
     name: nameOf(c.config),
     autonomy: autonomyOf(c.config),
@@ -138,6 +140,18 @@ export async function sendChatMessage(
     memory: c.memory,
     state: c.state,
   });
+  } catch (e) {
+    const err = e as Error & { quota?: boolean; transient?: boolean };
+    // Never leave the chat hanging on a dead brain: say what's wrong, in the chat, once per message.
+    const reply = err.quota
+      ? `my brain's offline: ${err.message}`
+      : err.transient
+        ? "gemini's overloaded right now — give me a second and ask again."
+        : `brain error: ${err.message}`;
+    const out = [msg("bob", reply)];
+    c.messages.push(...out);
+    return { messages: out };
+  }
 
   // Hold onto anything worth remembering across turns.
   remember(c, decision.remember);

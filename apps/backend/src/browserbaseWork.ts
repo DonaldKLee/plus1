@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright-core";
 import type { BrowseSession } from "@plus1/protocol";
-import { CACHE_DIR, ensureCacheDir, envOptional } from "./env.js";
+import { STATE_DIR, ensureDir, envOptional } from "./env.js";
 
 export interface BrowseTarget {
   address: string;
@@ -82,7 +82,7 @@ async function runWithStagehand(
   projectId: string,
   keepOpen: boolean,
 ): Promise<BrowseSession> {
-  ensureCacheDir();
+  ensureDir(STATE_DIR);
   const query = formatQuery(target);
   const steps: BrowseSession["steps"] = [];
 
@@ -169,7 +169,7 @@ async function runWithStagehand(
     });
   }
 
-  const shot = path.join(CACHE_DIR, `browse-${sessionId}.png`);
+  const shot = path.join(STATE_DIR, `browse-${sessionId}.png`);
   try {
     const png = await page.screenshot({ fullPage: false });
     fs.writeFileSync(shot, png);
@@ -192,7 +192,7 @@ async function runWithStagehand(
   }
 
   fs.writeFileSync(
-    path.join(CACHE_DIR, keepOpen ? "screenshare-session.json" : "last-browse.json"),
+    path.join(STATE_DIR, keepOpen ? "screenshare-session.json" : "last-browse.json"),
     JSON.stringify(browse, null, 2),
   );
 
@@ -222,7 +222,7 @@ async function runWithCdp(
   projectId: string,
   keepOpen: boolean,
 ): Promise<BrowseSession> {
-  ensureCacheDir();
+  ensureDir(STATE_DIR);
   const query = formatQuery(target);
   const steps: BrowseSession["steps"] = [];
   const { session } = await createBbSession(apiKey, projectId);
@@ -264,14 +264,14 @@ async function runWithCdp(
       });
     }
 
-    const shot = path.join(CACHE_DIR, `browse-${session.id}.png`);
+    const shot = path.join(STATE_DIR, `browse-${session.id}.png`);
     await page.screenshot({ path: shot, fullPage: false });
     browse.screenshotPath = shot;
     steps.push({ label: "screenshot", ok: true, detail: shot });
     browse.status = keepOpen ? "running" : "done";
 
     fs.writeFileSync(
-      path.join(CACHE_DIR, keepOpen ? "screenshare-session.json" : "last-browse.json"),
+      path.join(STATE_DIR, keepOpen ? "screenshare-session.json" : "last-browse.json"),
       JSON.stringify({ ...browse, connectUrl: session.connectUrl }, null, 2),
     );
 
@@ -370,7 +370,7 @@ export async function openWorkSessionForScreenshare(
 export async function openLocalWorkPreview(
   target: BrowseTarget,
 ): Promise<BrowseSession> {
-  ensureCacheDir();
+  ensureDir(STATE_DIR);
   const query = formatQuery(target);
   const mapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
   const femaUrl = "https://msc.fema.gov/portal/home";
@@ -428,7 +428,7 @@ export async function openLocalWorkPreview(
     ],
   };
   fs.writeFileSync(
-    path.join(CACHE_DIR, "screenshare-session.json"),
+    path.join(STATE_DIR, "screenshare-session.json"),
     JSON.stringify(browse, null, 2),
   );
   return browse;

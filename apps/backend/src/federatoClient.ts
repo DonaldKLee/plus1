@@ -2,35 +2,22 @@
  * Federato HTN API client — Auth0 token + schema/query actions.
  */
 
-import fs from "node:fs";
-import path from "node:path";
-import { CACHE_DIR, ensureCacheDir, env } from "./env.js";
+import { env } from "./env.js";
 
 interface TokenCache {
   access_token: string;
   expires_at: number;
 }
 
+// Everything here is process memory. Tokens last 4 hours and are cheap to mint; the schema and
+// the expanded property book are re-fetched after SNAPSHOT_TTL_MS or on demand. Nothing is
+// written to disk.
 let memoryToken: TokenCache | null = null;
 
-function tokenPath() {
-  return path.join(CACHE_DIR, "token.json");
-}
-
 export async function getAccessToken(force = false): Promise<string> {
-  ensureCacheDir();
   const now = Date.now();
   if (!force && memoryToken && memoryToken.expires_at > now + 60_000) {
     return memoryToken.access_token;
-  }
-  try {
-    const disk = JSON.parse(fs.readFileSync(tokenPath(), "utf8")) as TokenCache;
-    if (!force && disk.expires_at > now + 60_000) {
-      memoryToken = disk;
-      return disk.access_token;
-    }
-  } catch {
-    /* mint fresh */
   }
 
   const res = await fetch(env("FEDERATO_AUTH_URL"), {
@@ -54,7 +41,6 @@ export async function getAccessToken(force = false): Promise<string> {
     access_token: body.access_token,
     expires_at: now + body.expires_in * 1000,
   };
-  fs.writeFileSync(tokenPath(), JSON.stringify(memoryToken, null, 2));
   return memoryToken.access_token;
 }
 
@@ -115,17 +101,20 @@ export async function runQuery(
   return data as { total?: number; results?: unknown[]; resource?: string };
 }
 
+const SNAPSHOT_TTL_MS = 10 * 60 * 1000;
+interface Snapshot { at: number; schema: Record<string, unknown>; policies: unknown[] }
+let snapshot: Snapshot | null = null;
+
+/**
+ * Refresh the in-memory snapshot: the live schema and every property policy, expanded with
+ * insured, claims, submission, broker and locations/buildings. Called on demand and when stale.
+ */
 export async function cacheSchemaAndPolicies(): Promise<{
-  schemaPath: string;
-  policiesPath: string;
   schemaResources: string[];
   policyCount: number;
+  refreshedAt: string;
 }> {
-  ensureCacheDir();
   const schema = await fetchSchema();
-  const schemaPath = path.join(CACHE_DIR, "schema.json");
-  fs.writeFileSync(schemaPath, JSON.stringify(schema, null, 2));
-
   const policies: unknown[] = [];
   let offset = 0;
   const limit = 50;
@@ -148,40 +137,18 @@ export async function cacheSchemaAndPolicies(): Promise<{
     offset += limit;
     if (offset > 500) break;
   }
-
-  const policiesPath = path.join(CACHE_DIR, "property-policies.json");
-  fs.writeFileSync(
-    policiesPath,
-    JSON.stringify({ cachedAt: new Date().toISOString(), results: policies }, null, 2),
-  );
-
-  return {
-    schemaPath,
-    policiesPath,
-    schemaResources: Object.keys(schema),
-    policyCount: policies.length,
-  };
+  snapshot = { at: Date.now(), schema, policies };
+  return { schemaResources: Object.keys(schema), policyCount: policies.length, refreshedAt: new Date(snapshot.at).toISOString() };
 }
 
+const fresh = () => snapshot && Date.now() - snapshot.at < SNAPSHOT_TTL_MS;
+
+/** The schema from the in-memory snapshot, or null when there is none yet (callers fetch live). */
 export function loadCachedSchema(): Record<string, unknown> | null {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(CACHE_DIR, "schema.json"), "utf8"));
-  } catch {
-    return null;
-  }
+  return fresh() ? snapshot!.schema : null;
 }
 
+/** The expanded property book from the in-memory snapshot, or null when stale/absent. */
 export function loadCachedPolicies(): unknown[] | null {
-  try {
-    const raw = JSON.parse(
-      fs.readFileSync(path.join(CACHE_DIR, "property-policies.json"), "utf8"),
-    );
-    const results: unknown[] = raw.results ?? raw;
-    // Older caches never expanded producer.broker; refetch so brokers have names.
-    const first = results[0] as { producer?: { broker?: unknown } } | undefined;
-    if (first && typeof first.producer?.broker === "number") return null;
-    return results;
-  } catch {
-    return null;
-  }
+  return fresh() ? snapshot!.policies : null;
 }

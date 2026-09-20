@@ -27,18 +27,28 @@ packages/voice         ElevenLabs streaming TTS -> PCM 24 kHz + cached fillers (
   as extra factors; `queryGuide.ts` renders the live schema for the planner, validates payloads
   ($elemMatch through arrays, expand-then-filter, select shapes) and collapses per-record rows into
   groups; `guidelines.ts` is the table + glossary as data.
-- Network only in `apps/backend`: `federatoClient.ts` (auth, schema, query), `enrichment.ts`
-  (OpenFEMA declarations by county, NFIP claims by zip, Open-Meteo extremes; cached on disk),
+- Network only in `apps/backend`: `federatoClient.ts` (auth, schema, query), `submissions.ts`
+  (INGEST open submissions + insured history → ENRICH → CLASSIFY, with broker request lists),
+  `enrichment.ts` (six sources: FEMA NRI, OpenFEMA declarations, NFIP claims, USGS quakes,
+  Open-Meteo 5-year extremes, OSM reverse geocode; lookups remembered in the OS temp dir), `drafts.ts` (quote /
+  declarations / decline / memo templates from a bound record + appetite), `contractTemplate.ts`
+  (the contract package from an OPEN submission: ingest → enrich → classify → draft, each field
+  tagged submission / insured history / expiring policy / external data / appetite engine / to be
+  provided; saved as .md + .json under `apps/backend/output/drafts/`; drafts only, never sent or bound),
   `federatoQuery.ts` (agentic: goal → Gemini planner with compact schema + query rules → validate
   → run → re-plan on empty/error → collapse groups; every attempt is traced), `federatoTools.ts`
-  (the goose's tools: `federato_queue`, `federato_account`, `federato_query`, `federato_portfolio`,
-  `federato_enrich`, `federato_guidelines`; tool docs live there and feed the brain prompt).
+  (the goose's tools: `federato_submissions`, `federato_queue`, `federato_account`, `federato_query`,
+  `federato_portfolio`, `federato_enrich`, `federato_guidelines`, `federato_draft`; tool docs live
+  there and feed the brain prompt).
 - The brain can chain tools: `narrateToolResult` may return `nextTool`; `runToolChain` in
   `tools.ts` runs it (cap 3) for both chat and meeting; traces land in session notes ("why:").
 - The API's `over` returns one row per record — never trust its grouping; `collapseGroups` does it.
+- No `cache/` folder: Federato token, schema and the expanded book live in process memory (10-min TTL, `npm run backend:warm` to prefetch); drafts go to `apps/backend/output/drafts/`; the Chrome profile is `apps/backend/.profile` (or `MEET_PROFILE_DIR`); disposable state (enrichment lookups, Browserbase session pointer, debug screenshots) sits in `$TMPDIR/plus1-backend`.
 - Direct routes for judges/UW tab: `POST /api/federato/query {goal}`, `POST /api/federato/tool
   {name, query}`, `GET /api/federato/portfolio?by=`, `GET /api/federato/enrich/:policyId`,
-  `GET /api/federato/rank?enrich=1`, `GET /api/federato/deep-dive/:id?enrich=1`.
+  `GET /api/federato/rank?enrich=1`, `GET /api/federato/deep-dive/:id?enrich=1`,
+  `GET /api/federato/submissions`, `GET /api/federato/draft/:id?kind=quote|declarations|decline|memo[&format=md]`,
+  `GET /api/federato/contract/:submissionRef[?format=md]`.
 - Dashboard UW tab polls `NEXT_PUBLIC_BACKEND_URL` (default `:8787`).
 - Camera/plus1 is teammate-owned; screenshare = Present Browserbase live-view tab.
 

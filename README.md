@@ -59,7 +59,7 @@ npm run dashboard             # UI     http://localhost:3000
 Optional cache refresh (schema + ~27 property policies):
 
 ```bash
-npm run backend:cache
+npm run backend:warm
 ```
 
 Open **http://localhost:3000 → UW tab**.
@@ -80,7 +80,7 @@ Playwright cannot see your everyday Chrome. Sign in **once** in the plus1 profil
 npm run backend:google-login
 ```
 
-Sign into Google in the headed window that opens. Session is saved at `apps/backend/cache/screenshare-profile` (gitignored). Reuse it on later runs unless you delete that folder.
+Sign into Google in the headed window that opens. Session is saved at `apps/backend/.profile` (gitignored). Reuse it on later runs unless you delete that folder.
 
 ## Join Meet + Present
 
@@ -121,7 +121,7 @@ curl -X POST http://localhost:8787/api/federato/present-meet \
 |--------|--|
 | `npm run backend` | Backend `:8787` |
 | `npm run dashboard` | Dashboard `:3000` |
-| `npm run backend:cache` | Refresh schema + policies |
+| `npm run backend:warm` | Refresh schema + policies |
 | `npm run backend:rank` | CLI rank |
 | `npm run backend:google-login` | One-time Google sign-in |
 | `npm run backend:screenshare` | Live view + join + Present |

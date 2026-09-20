@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { BrowserContext, Page } from "playwright-core";
 import { chromium } from "playwright-core";
-import { CACHE_DIR, ROOT, envOptional } from "./env.js";
+import { PROFILE_DIR, ROOT, STATE_DIR, ensureDir, envOptional } from "./env.js";
 
 export const WORK_TAB_TITLE = "plus1-work";
 
@@ -32,7 +32,7 @@ function chromePath(): string | undefined {
 /** Chrome profile the plus1/presenter joins with. MEET_PROFILE_DIR (relative to repo root) overrides. */
 export function screenshareProfileDir(): string {
   const override = envOptional("MEET_PROFILE_DIR");
-  return override ? path.resolve(ROOT, override) : path.join(CACHE_DIR, "screenshare-profile");
+  return override ? path.resolve(ROOT, override) : PROFILE_DIR;
 }
 
 /**
@@ -204,7 +204,7 @@ async function clickJoinish(page: Page): Promise<string | null> {
 
 async function dumpMeetDebug(page: Page, notes: string[]): Promise<void> {
   try {
-    const shot = path.join(CACHE_DIR, "meet-join-debug.png");
+    const shot = path.join(ensureDir(STATE_DIR), "meet-join-debug.png");
     await page.screenshot({ path: shot, fullPage: true });
     notes.push(`Debug screenshot: ${shot}`);
     notes.push(`Meet URL now: ${page.url()}`);

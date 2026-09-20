@@ -6,6 +6,9 @@ import { cacheSchemaAndPolicies } from "./federatoClient.js";
 import { rankQueue } from "./rank.js";
 import { agenticQuery } from "./federatoQuery.js";
 import { runFederatoTool } from "./federatoTools.js";
+import { rankOpenSubmissions } from "./submissions.js";
+import { draftDocument, type DraftKind } from "./drafts.js";
+import { buildContractDraft } from "./contractTemplate.js";
 import { deepDivePolicy } from "./deepDive.js";
 import {
   openWorkSessionForScreenshare,
@@ -94,6 +97,34 @@ app.post("/api/federato/query", async (req, res) => {
     const goal = typeof req.body?.goal === "string" ? req.body.goal.trim() : "";
     if (!goal) { res.status(400).json({ error: "body.goal (plain english) required" }); return; }
     res.json(await agenticQuery(goal));
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+app.get("/api/federato/draft/:policyId", async (req, res) => {
+  try {
+    const kind = (typeof req.query.kind === "string" ? req.query.kind : "quote") as DraftKind;
+    if (!["quote", "declarations", "decline", "memo"].includes(kind)) { res.status(400).json({ error: "kind must be quote | declarations | decline | memo" }); return; }
+    const d = await draftDocument(kind, Number(req.params.policyId));
+    if (req.query.format === "md") { res.type("text/markdown").send(d.markdown); return; }
+    res.json(d);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+app.get("/api/federato/contract/:ref", async (req, res) => {
+  try {
+    const d = await buildContractDraft(String(req.params.ref));
+    if (req.query.format === "md") { res.type("text/markdown").send(d.markdown); return; }
+    res.json(d);
+  } catch (e) {
+    res.status(/no open submission/.test((e as Error).message) ? 404 : 500).json({ error: (e as Error).message });
+  }
+});
+app.get("/api/federato/submissions", async (req, res) => {
+  try {
+    const enrich = req.query.enrich !== "0";
+    res.json(await rankOpenSubmissions({ enrich }));
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }

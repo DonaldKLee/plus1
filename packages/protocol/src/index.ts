@@ -99,3 +99,42 @@ export interface DeepDiveResponse {
   browse: BrowseSession | null;
   hops: MindHop[];
 }
+
+/** One open submission after ingest → enrich → classify. */
+export interface SubmissionIntake {
+  rank: number;
+  submissionId: number;
+  submissionNumber: string;
+  status: string;
+  receivedDate: string | null;
+  targetEffectiveDate: string | null;
+  requestedLimit: number | null;
+  accountName: string;
+  broker: string | null;
+  brokerTier: string | null;
+  lineOfBusiness: string;
+  businessType: "new" | "renewal";
+  /** Where the exposure came from (insured's policies on file). */
+  basis: { priorPolicies: number; priorSameLine: number; locations: number; claims: number; note: string };
+  primaryState: string | null;
+  tiv: number | null;
+  score: number;
+  maxScore: number;
+  decision: UnderwriteDecision;
+  explanation: string;
+  factors: FactorScore[];
+  /** What to ask the broker for before this can be classified with confidence. */
+  requests: string[];
+  /** External risk data for the primary location, when enrichment ran. */
+  enrichment?: unknown;
+  /** Stage timings for the console: INGEST / ENRICH / CLASSIFY. */
+  hops: MindHop[];
+}
+
+export interface SubmissionIntakeResponse {
+  generatedAt: string;
+  openSubmissions: number;
+  enriched: boolean;
+  ranked: SubmissionIntake[];
+  hops: MindHop[];
+}

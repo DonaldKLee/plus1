@@ -8,7 +8,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { CACHE_DIR, envOptional } from "./env.js";
+import { STATE_DIR, envOptional } from "./env.js";
 import { deepDivePolicy } from "./deepDive.js";
 import { openWorkSessionForScreenshare } from "./browserbaseWork.js";
 import { presentLiveViewInMeet, resolveMeetUrl } from "./meetPresent.js";
@@ -20,7 +20,7 @@ async function resolveLiveView(): Promise<{
   const fromEnv = envOptional("LIVE_VIEW_URL");
   if (fromEnv) return { liveViewUrl: fromEnv };
 
-  const cached = path.join(CACHE_DIR, "screenshare-session.json");
+  const cached = path.join(STATE_DIR, "screenshare-session.json");
   if (fs.existsSync(cached)) {
     const j = JSON.parse(fs.readFileSync(cached, "utf8")) as {
       liveViewUrl?: string;

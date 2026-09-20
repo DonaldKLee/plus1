@@ -56,13 +56,15 @@ head of the page; under it, the plus1 wordmark at 11pt semibold ink on the left 
 in 9pt mono at `--fg-subtle` right-aligned on the same baseline. 34pt of air. Title at 25pt
 semibold, tracking -0.04em, wrapping to at most three lines. Subtitle at 11pt `--fg-muted`
 directly under it. A hairline across the measure. Then, when the document carries figures, the
-figure band: a #fafafa panel with no border, each figure's label in 8pt mono uppercase-tracked
+figure band: a #fafafa panel with no border, each figure's label in 7.5pt mono uppercase-tracked
 `--fg-subtle` above its value in 17pt mono medium ink, laid out in equal columns. Then the body.
 There is no primary action — it is paper.
 
 FORM: no concept roll. This is a narrow, precisely specified artifact inside an established
-visual world (DESIGN.md is committed and unchanged), which the playbook routes as a direct
-extension rather than a direction tournament. Seed key: none — extension scope.
+visual world (DESIGN.md's web sections are committed and unchanged), which the playbook routes as a
+direct extension rather than a direction tournament. Seed key: none — extension scope.
+The build's durable print decisions were added to DESIGN.md as a new `## Print` section; nothing
+above it was rewritten.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the
 verdict, DESIGN.md, and every shipping raster carrying its provenance.
@@ -77,7 +79,37 @@ and a checklist for action items. The brain's `doc_pdf` instruction requires car
 number, date, name and amount from the request verbatim, and requires a table whenever two or
 more comparable figures exist.
 
+## Promoted to DESIGN.md
+
+The reusable half of this build now lives in **DESIGN.md § Print**, because it belongs to the world
+rather than to this file: the print grid (US Letter, 1in margins, 468pt full measure, 404pt prose
+measure), the masthead and running-head rule, the Mono-Means-Measured Rule and the tracking ramp
+drawn through `Tc`, the one-hairline and two-fills constraints, the key-figure band, the table
+rules, and the One Empty Mark Rule. A second document surface (an invoice, a brief, an exported
+summary) inherits those from DESIGN.md without reading this brief. What stays here is everything
+specific to *this* renderer — the content contract above, the pdf-lib workarounds, and the defects
+this build carries.
+
+## Settled during the build
+
+- Ligatures are disabled at embed time. fontkit substitutes Geist's ff/tt/fi ligatures while
+  pdf-lib's width table uses single-glyph advances, which opened a visible hole in the line after
+  every ligature. Do not turn them back on without re-checking the wrap.
+- One hairline: 1pt `--border` everywhere, including the rule that closes a table header. The
+  header separates itself with tracked mono uppercase type; a darker rule was a second treatment.
+- An empty table cell is always the same mark (en dash, mono, `--fg-subtle`), whatever the
+  markdown wrote and whatever face the column uses.
+- Links are real `/Annot /Link` objects with a `/URI` action, and the URL is still printed: this
+  is paper first, and a link nobody can read is useless once it leaves the screen.
+- Spec-row groups and their headings break as a unit, measured from the group's real height.
+
 ## Unresolved
 
 - Geist ships as TTF under `apps/backend/assets/fonts` (OFL). If those files are ever absent the
-  renderer falls back to Helvetica and the document still renders — degraded, never broken.
+  renderer falls back to the PDF core fonts and the document still renders — degraded, never
+  broken. `docFontStatus()` reports it at server boot so this is an operator's problem to know
+  about rather than a reader's to discover. Courier as the fallback mono is a costume face and is
+  accepted only because it is the floor of a degraded path.
+- A short trailing block (the closing code block in the sample) can still take a page of its own
+  when it misses the floor by a few points. No pagination hack was added to chase it; if this
+  becomes common, generalize the keep-with-next reserve beyond spec groups.

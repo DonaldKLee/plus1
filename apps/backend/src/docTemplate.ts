@@ -604,6 +604,9 @@ const bare = (s: string): string => s.replace(/\*\*|__|`|\*/g, "").trim();
  */
 const PLACEHOLDER = /^(|-{1,2}|\u2013|\u2014|n\/?a|tbd|\u2022)$/i;
 
+/** The one mark an empty cell gets, whatever the markdown wrote there. */
+const EMPTY_CELL = "\u2013";
+
 interface Table {
   head: string[];
   rows: string[][];
@@ -706,11 +709,14 @@ function drawTable(c: Ctx, t: Table): void {
       draw(c.page, label, { x, y: c.y - 8.2, size: 8.2, font: c.f.monoMedium, color: C.subtle, tracking: 0.4 });
     });
     c.y -= 15;
+    // One hairline ink, not two: the tracked mono uppercase label already
+    // separates the header from the body, so a darker rule here was a second
+    // treatment doing work the type had done.
     c.page.drawLine({
       start: { x: M, y: c.y },
       end: { x: M + FULL_W, y: c.y },
       thickness: 1,
-      color: C.borderStrong,
+      color: C.border,
     });
     c.y -= 4;
   };
@@ -719,16 +725,28 @@ function drawTable(c: Ctx, t: Table): void {
   header();
 
   for (const row of t.rows) {
-    const laid = row.map((cell, i) =>
-      layoutRuns(
+    const laid = row.map((cell, i) => {
+      // "No value here" is one mark, set one way. Leaving it to the column's own
+      // face printed a sans em dash beside a mono one in the same row.
+      if (PLACEHOLDER.test(bare(cell))) {
+        return layoutRuns(
+          [{ text: EMPTY_CELL, style: "plain" }],
+          c.f,
+          CELL,
+          c.f.mono,
+          C.subtle,
+          widths[i] - CELL_PAD * 2,
+        );
+      }
+      return layoutRuns(
         inlineTokens(cell),
         c.f,
         CELL,
         fontFor(i, false),
         i === 0 ? C.ink : C.muted,
         widths[i] - CELL_PAD * 2,
-      ),
-    );
+      );
+    });
     const rowH = Math.max(...laid.map((l) => l.length)) * CELL * 1.5 + 9;
 
     if (c.y - rowH < BOTTOM) {
@@ -970,6 +988,21 @@ function parseBlocks(src: string): Block[] {
   return out;
 }
 
+/**
+ * How tall the run of spec rows starting at `from` is, capped at `max` rows.
+ * Page breaks are decided against this rather than against a guessed constant,
+ * which is what let a three-row group split 1/2 with its heading stranded.
+ */
+function groupHeight(blocks: Block[], from: number, max = 3): number {
+  let h = 0;
+  for (let i = from; i < blocks.length && i - from < max; i++) {
+    const k = blocks[i].kind;
+    if (k !== "def" && k !== "lead") break;
+    h += BODY * LEAD + 8; // the row, plus the gap above it
+  }
+  return h;
+}
+
 function renderBody(c: Ctx, body: string): void {
   const blocks = parseBlocks(normalizeText(body, c.f.geist));
   let prev: Block["kind"] | undefined;
@@ -990,9 +1023,10 @@ function renderBody(c: Ctx, body: string): void {
         // Keep a heading with what follows it: two lines of anything, or three
         // rows when it opens a spec group, so a group never splits 1/2 across
         // a page break with its heading stranded above the fold.
-        const follow =
-          next?.kind === "def" || next?.kind === "lead" ? BODY * LEAD * 3 : BODY * LEAD * 2;
-        need(c, size * 2.4 + follow);
+        const group = groupHeight(blocks, bi + 1);
+        const follow = group || BODY * LEAD * 2;
+        // The heading's own cost: the lead-in gap, its line, and the gap below.
+        need(c, (block.level === 1 ? 15 : 12) + size * 1.28 + (block.level === 1 ? 17 : 6) + follow);
         c.y -= block.level === 1 ? 15 : 12;
         paragraph(c, block.text, {
           size,
@@ -1078,7 +1112,7 @@ function renderBody(c: Ctx, body: string): void {
         // Widow control: a group of spec rows breaks as a group. Reserving the
         // next row's height too is what keeps one lonely row from opening the
         // following page.
-        need(c, next?.kind === "def" ? BODY * LEAD * 2 + 8 : BODY * LEAD);
+        need(c, Math.max(BODY * LEAD, groupHeight(blocks, bi)));
         const lw = widthOf(block.label, c.f.semibold, BODY) + 10;
         draw(c.page, block.label, { x: M, y: c.y - BODY, size: BODY, font: c.f.semibold, color: C.ink });
         const value = layoutRuns(inlineTokens(block.value), c.f, BODY, c.f.sans, C.muted, PROSE_W - lw);

@@ -27,7 +27,7 @@ because the experience is built for the insurer, not the buyer.
 - **Announced actions.** Every tool call is narrated first ("one sec, pricing that up…"), so it's
   never a silent black box.
 
-The **rating engine is deterministic and pure** (`packages/brain/src/intact`), not the LLM — so
+The **rating engine is deterministic and pure** (`packages/brain/src/intact`), not the LLM, so
 quotes are consistent and explainable. Its base rates are **calibrated to public provincial
 averages** (IBC/FSRA: e.g. ON ≈ $2,068/yr, QC ≈ $1,044/yr; renters ≈ $18/mo) and adjusted by
 public rate-filing factors. The AI runs the conversation; the math is auditable. Unit tests in
@@ -74,7 +74,7 @@ public rate-filing factors. The AI runs the conversation; the math is auditable.
 ## Assumptions & limitations
 
 - **The rating is synthetic, but calibrated.** Base rates are anchored to public provincial
-  averages (IBC/FSRA) and adjusted by public rate-filing factors — realistic, but **not** a binding
+  averages (IBC/FSRA) and adjusted by public rate-filing factors. Although it is realistic, it is **not** a binding
   Intact quote. Every quote and PDF says so. No insurer exposes its real rating engine, so there is
   no "real Intact price" to call; our tools are structured so a real Intact/belairdirect API drops
   in behind `intact_quote_*` unchanged.

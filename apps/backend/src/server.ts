@@ -41,6 +41,17 @@ import {
   searchMeetings,
   storeEnabled,
 } from "./store.js";
+import {
+  loadWorkCamConfig,
+  persistWorkCamConfig,
+  type WorkCamMode,
+} from "./workCamConfig.js";
+import {
+  getWorkCamSession,
+  listWorkCamSessions,
+  startWorkCam,
+  stopWorkCam,
+} from "./workCamMeet.js";
 
 const app = express();
 const configuredOrigin = envOptional("DASHBOARD_ORIGIN") ?? "http://localhost:3000";
@@ -209,7 +220,8 @@ app.post("/api/meet/join", (req, res) => {
   }
   const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : undefined;
   const purpose = typeof req.body?.purpose === "string" ? req.body.purpose : undefined;
-  const { sessionId } = startMeetTranscription(meetUrl, config, purpose);
+  const workTask = typeof req.body?.task === "string" ? req.body.task : undefined;
+  const { sessionId } = startMeetTranscription(meetUrl, config, purpose, workTask);
   res.json({ sessionId });
 });
 
@@ -332,7 +344,6 @@ app.put("/api/plus1/config", async (req, res) => {
   }
 });
 
-// ── Live chat with the plus1 (no meeting) ───────────────────────────────────
 // Serve a generated Intact quote PDF (in-memory, short-lived).
 app.get("/api/intact/quote/:id.pdf", (req, res) => {
   const bytes = getQuotePdf(String(req.params.id));
@@ -371,6 +382,88 @@ app.get("/api/email/status", async (req, res) => {
   res.json(status);
 });
 
+// ── Work-cam: local Present vs cloud camera ─────────────────────────────────
+app.get("/api/work-cam/config", async (_req, res) => {
+  try {
+    const cfg = await loadWorkCamConfig();
+    res.json(cfg);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+app.put("/api/work-cam/config", async (req, res) => {
+  const mode = req.body?.mode;
+  if (mode !== "local" && mode !== "cloud") {
+    res.status(400).json({ error: 'Expected { mode: "local" | "cloud" }' });
+    return;
+  }
+  try {
+    const cfg = await persistWorkCamConfig({ mode });
+    res.json({ ok: true, ...cfg });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+app.get("/api/work-cam/sessions", (_req, res) => {
+  res.json({ sessions: listWorkCamSessions() });
+});
+
+app.get("/api/work-cam/sessions/:id", (req, res) => {
+  const s = getWorkCamSession(String(req.params.id));
+  if (!s) {
+    res.status(404).json({ error: "No such work-cam session" });
+    return;
+  }
+  res.json(s);
+});
+
+app.post("/api/work-cam/start", async (req, res) => {
+  const meetUrl = typeof req.body?.meetUrl === "string" ? req.body.meetUrl.trim() : "";
+  if (!MEET_RE.test(meetUrl)) {
+    res.status(400).json({
+      error: "Pass a Google Meet URL like https://meet.google.com/abc-defg-hij",
+    });
+    return;
+  }
+  const modeRaw = req.body?.mode;
+  const mode: WorkCamMode | undefined =
+    modeRaw === "local" || modeRaw === "cloud" ? modeRaw : undefined;
+  const task = typeof req.body?.task === "string" ? req.body.task.trim() : undefined;
+  const startUrl =
+    typeof req.body?.startUrl === "string" ? req.body.startUrl.trim() : undefined;
+  const sessionId =
+    typeof req.body?.sessionId === "string" ? req.body.sessionId.trim() : undefined;
+  const connectUrl =
+    typeof req.body?.connectUrl === "string" ? req.body.connectUrl.trim() : undefined;
+
+  try {
+    // startWorkCam is long-running — await it so the response has real status.
+    const session = await startWorkCam({
+      meetUrl,
+      mode,
+      task: task || undefined,
+      startUrl: startUrl || undefined,
+      sessionId: sessionId || undefined,
+      connectUrl: connectUrl || undefined,
+    });
+    res.json(session);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+app.post("/api/work-cam/sessions/:id/stop", async (req, res) => {
+  const ok = await stopWorkCam(String(req.params.id));
+  if (!ok) {
+    res.status(404).json({ error: "No such work-cam session" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+// ── Live chat with the plus1 (no meeting) ───────────────────────────────────
 app.post("/api/chat/sessions", (req, res) => {
   const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : undefined;
   res.json(createChat(config));

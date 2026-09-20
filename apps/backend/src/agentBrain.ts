@@ -125,6 +125,11 @@ export interface ToolAccess {
   /** Generate PDF documents. */
   docs?: boolean;
   /**
+   * Share the Browserbase work browser into Meet and run a task on it.
+   * Default on in meetings so Shannon can Present without a dashboard toggle.
+   */
+  browser?: boolean;
+  /**
    * guardrails.sendApproval — when true, an email is previewed and confirmed
    * before it goes out. Not a tool toggle; it changes how email_send behaves.
    */
@@ -214,6 +219,12 @@ NEVER read the resulting link out loud, character by character or otherwise — 
       doc: `run_command(command) — run a shell command on the user's machine to actually get something done that the file tools can't (create a PDF, convert a file, open an app, etc). Set tool.command to the exact bash command.`,
     });
   }
+  if (access.browser !== false) {
+    tools.push({
+      name: "browser_work",
+      doc: `browser_work(query) — share YOUR screen into this Meet (Present the Browserbase work tab) and have the cloud browser agent actually do the task on screen. Call this in the SAME turn whenever someone asks you to share your screen, pull something up, look something up on the web, demo a site, play a game, or "show me". Put the full task in tool.query — include any address, name, URL, or details from the meeting. After it finishes, LEAVE THE SCREEN UP for follow-up asks (another browser_work reuses the same window). Do not stop sharing unless they explicitly tell you to. Dedicated tools (federato_*, intact_*, doc_pdf, email_*) still win when they match; this is for doing something visible on screen.`,
+    });
+  }
   return tools;
 }
 
@@ -270,6 +281,15 @@ WORKED EXAMPLES (what someone says → what you do, in the same turn):
 - After a tool: lead with the decision or the number, then the ONE factor that drives it, then the next step ("cross continental's a decline: premium's a hundred eighty-eight over the one seventy-five cap and the buildings are seventy-eight. want the next one?").
 `
     : "";
+  const browserNote = opts.tools.some((t) => t.name === "browser_work")
+    ? `
+SCREEN SHARE: you have a live Browserbase work browser you can Present into this Meet.
+- "share your screen and …" / "pull this up" / "show me …" / "look that up on the web" → action="tool", tool.name="browser_work", tool.query=the full task (include names, addresses, URLs from the transcript), say="sharing my screen, one sec".
+- After it returns, the share STAYS UP. Follow-up asks ("now search for X", "click into that") are another browser_work — do not stop presenting.
+- Only stop if they explicitly say stop / stop sharing / you can stop presenting. Until then, leave the window there waiting.
+- If they just say "share your screen" with no task, still call browser_work with a sensible default from context (the thing you were just talking about) rather than asking what to share.
+`
+    : "";
   const mutedNote = opts.muted
     ? `\nYou are in CHAT-ONLY mode right now: someone asked you to stop talking and use the chat. Keep participating exactly as before, but your words go to the meeting chat, not out loud. Stay this way until someone tells you to talk / unmute again.\n`
     : "";
@@ -302,7 +322,7 @@ GUARDRAILS:
 - Never stall silently. If you're working on something, say so.
 - Deflect off-topic noise. If the room drifts onto something you're not here to advise on, give it a beat and steer back to the active task.
 - Be aware other people are in the room. Only speak when you're addressed or when your specific expertise or action is clearly what's needed. When humans are working something out between themselves, stay out of it (action="none").
-${memorySection}${underwriterNote}${mutedNote}${renderState(opts.state)}
+${memorySection}${underwriterNote}${browserNote}${mutedNote}${renderState(opts.state)}
 Act when it is useful and welcome:
 - Someone addresses you ("${name}" or "plus one").
 - Someone asks an open question you or a tool can helpfully answer.

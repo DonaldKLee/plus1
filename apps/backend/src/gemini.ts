@@ -9,18 +9,23 @@ import { env } from "./env.js";
 // flash-lite-latest has far more free headroom and is plenty for classification.
 export const DECIDE_MODEL = process.env.GEMINI_BRAIN_MODEL || "gemini-flash-lite-latest";
 
+export type InlineImage = { mimeType: string; data: string };
+
 export async function generateJson(
   systemText: string,
   userText: string,
   schema: Record<string, unknown>,
   temperature = 0.2,
   model = DECIDE_MODEL,
+  images?: InlineImage[],
 ): Promise<Record<string, unknown>> {
   const key = env("GEMINI_API_KEY");
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+  const parts: Array<{ text: string } | { inlineData: InlineImage }> = [{ text: userText }];
+  for (const img of images ?? []) parts.push({ inlineData: img });
   const body = {
     systemInstruction: { parts: [{ text: systemText }] },
-    contents: [{ role: "user", parts: [{ text: userText }] }],
+    contents: [{ role: "user", parts }],
     generationConfig: { temperature, responseMimeType: "application/json", responseSchema: schema },
   };
 

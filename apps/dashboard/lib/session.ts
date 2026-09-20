@@ -129,13 +129,22 @@ export function activeSessionId(): string | null {
   }
 }
 
-export async function joinMeeting(meetUrl: string, purpose?: string): Promise<string> {
+export async function joinMeeting(
+  meetUrl: string,
+  purpose?: string,
+  task?: string,
+): Promise<string> {
   // Prefer the config stored in MongoDB; fall back to this browser's copy.
   const config = (await fetchplus1Config()) ?? readplus1Config();
   const res = await fetch(`${AGENT_URL}/api/meet/join`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ meetUrl, config, purpose }),
+    body: JSON.stringify({
+      meetUrl,
+      config,
+      purpose,
+      task: task?.trim() || undefined,
+    }),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error ?? `Agent returned ${res.status}`);
@@ -224,7 +233,7 @@ export function speak(id: string, text: string): Promise<{ id: string }> {
   return post(`/api/meet/sessions/${id}/speak`, { text });
 }
 /** Instant cached filler ("on it.", "one sec."). */
-export function filler(id: string, kind: "ack" | "checking" | "wait" | "unsure" = "ack"): Promise<{ phrase?: string }> {
+export function filler(id: string, kind: "ack" | "checking" | "wait" | "unsure" | "thinking" | "loading" = "ack"): Promise<{ phrase?: string }> {
   return post(`/api/meet/sessions/${id}/filler`, { kind });
 }
 export function interrupt(id: string): Promise<void> {

@@ -10,6 +10,7 @@ import { runFederatoTool } from "./federatoTools.js";
 import { runIntactTool, type NextStep } from "./intactTools.js";
 import { runEmailTool } from "./emailTools.js";
 import { runDocTool } from "./docTools.js";
+import { runBrowserWork } from "./browserWork.js";
 import type { QuoteResult } from "@plus1/brain";
 
 export type ToolCall = NonNullable<Decision["tool"]>;
@@ -79,6 +80,13 @@ export async function executeTool(
         pendingApproval: r.pendingApproval,
       }))
       .catch((e: Error) => t(`email error: ${e.message}`));
+  }
+
+  if (name === "browser_work") {
+    if (access.browser === false) return t("screen share is turned off right now.");
+    return runBrowserWork({ meetingId: opts?.meetingId, task: call.query ?? "" }).catch((e: Error) =>
+      t(`browser error: ${e.message}`),
+    );
   }
 
   if (name === "run_command") {

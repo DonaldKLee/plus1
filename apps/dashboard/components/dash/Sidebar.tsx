@@ -19,7 +19,7 @@ const NAV = [
   { href: "/app", label: "Home", Icon: Home },
   { href: "/app/chat", label: "Chat", Icon: Chat },
   { href: "/app/meetings", label: "Meetings", Icon: History },
-  { href: "/app/plus1", label: "plus1", Icon: Sliders },
+  { href: "/app/plus1", label: "Settings", Icon: Sliders },
 ];
 
 function isActive(pathname: string, href: string) {

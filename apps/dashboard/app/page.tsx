@@ -8,7 +8,7 @@ import { ConsolePreview } from "@/components/site/ConsolePreview";
 import { ConsoleButton } from "@/components/site/ConsoleButton";
 
 export const metadata: Metadata = {
-  title: "plus1 — the meeting AI that joins the meeting",
+  title: "plus1 — cross-platform video agent that joins your calls",
 };
 
 const PROBLEMS = [

@@ -16,11 +16,20 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "plus1 — the meeting AI that joins the meeting",
+    default: "plus1 — cross-platform video agent that joins your calls",
     template: "%s — plus1",
   },
   description:
     "Every other meeting assistant records. plus1 joins your call as a visible guest, answers when addressed, and does the work while the meeting is still happening.",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon-32x32.png", type: "image/png", sizes: "32x32" },
+      { url: "/favicon-16x16.png", type: "image/png", sizes: "16x16" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
+  manifest: "/site.webmanifest",
 };
 
 export const viewport: Viewport = {

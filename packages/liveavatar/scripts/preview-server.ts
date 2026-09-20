@@ -43,12 +43,27 @@ const readBody = async (req: import("node:http").IncomingMessage): Promise<Buffe
   return Buffer.concat(chunks);
 };
 
+// Icons live next to preview.html so the page's <link rel=icon> tags resolve here too.
+const staticFiles: Record<string, string> = {
+  "/favicon.ico": "image/x-icon",
+  "/favicon-16x16.png": "image/png",
+  "/favicon-32x32.png": "image/png",
+  "/apple-touch-icon.png": "image/png",
+  "/android-chrome-192x192.png": "image/png",
+  "/android-chrome-512x512.png": "image/png",
+  "/site.webmanifest": "application/manifest+json",
+};
+
 createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${port}`);
   try {
     if (req.method === "GET" && url.pathname === "/") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       return res.end(readFileSync(resolve(here, "preview.html")));
+    }
+    if (req.method === "GET" && staticFiles[url.pathname]) {
+      res.writeHead(200, { "content-type": staticFiles[url.pathname], "cache-control": "public, max-age=3600" });
+      return res.end(readFileSync(resolve(here, `.${url.pathname}`)));
     }
     if (req.method === "GET" && url.pathname === "/page.iife.js") {
       res.writeHead(200, { "content-type": "application/javascript" });

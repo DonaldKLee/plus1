@@ -64,6 +64,10 @@ export interface DeepDiveResult {
   factors: FactorScore[];
   memoMarkdown: string;
   contradictionNotes: string[];
+  /** External risk data for the primary location, when enrichment ran (shape: brain HazardEnrichment). */
+  enrichment?: unknown;
+  /** Decision the appetite rules alone would have given, when enrichment changed it. */
+  decisionWithoutEnrichment?: UnderwriteDecision;
 }
 
 export interface BrowseSession {
@@ -84,6 +88,10 @@ export interface RankResponse {
   propertyPolicies: number;
   ranked: RankedSubmission[];
   hops: MindHop[];
+  /** True when external risk data was folded into the scores. */
+  enriched?: boolean;
+  /** The raw expanded policy records, when requested (portfolio aggregation). */
+  policies?: unknown[];
 }
 
 export interface DeepDiveResponse {

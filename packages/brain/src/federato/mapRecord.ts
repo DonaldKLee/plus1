@@ -47,6 +47,7 @@ function mapLocationFromExposure(eu: Record<string, unknown>): LocationInput | n
     hazardTags: tags,
     address: L.address == null ? undefined : String(L.address),
     city: L.city == null ? undefined : String(L.city),
+    county: L.county == null ? undefined : String(L.county),
     zip: L.zip == null ? undefined : String(L.zip),
     latitude: L.latitude == null ? null : Number(L.latitude),
     longitude: L.longitude == null ? null : Number(L.longitude),

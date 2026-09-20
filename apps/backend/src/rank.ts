@@ -13,6 +13,8 @@ import {
   loadCachedSchema,
   runQuery,
 } from "./federatoClient.js";
+import { enrichMany, enrichmentKey, primaryLocation } from "./enrichment.js";
+import type { HazardEnrichment } from "@plus1/brain";
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === "object" ? (v as Record<string, unknown>) : null;
@@ -20,6 +22,10 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 
 export async function rankQueue(opts?: {
   refresh?: boolean;
+  /** Fold OpenFEMA / Open-Meteo risk data for each primary location into the score (cached per location). */
+  enrich?: boolean;
+  /** Return the raw expanded policy records too (for client-side portfolio aggregation). */
+  withPolicies?: boolean;
 }): Promise<RankResponse> {
   const hops: MindHop[] = [];
   const t0 = Date.now();
@@ -74,14 +80,24 @@ export async function rankQueue(opts?: {
     queryTrace.push(`[submissions_page] skipped: ${(e as Error).message}`);
   }
 
-  hops.push({ stage: "SCORE", ms: Date.now() - t0, detail: "appetite engine" });
+  // External enrichment: one lookup per distinct primary location, cached on disk.
+  let enrichments: Map<string, HazardEnrichment> | null = null;
+  const inputs = policies.map((raw) => { const p = asRecord(raw); return p ? { policy: p, input: policyFromFederatoRecord(p) } : null; }).filter((x): x is { policy: Record<string, unknown>; input: ReturnType<typeof policyFromFederatoRecord> } => !!x);
+  if (opts?.enrich) {
+    const tE = Date.now();
+    const locs = inputs.map(({ input }) => primaryLocation(input.locations)).filter((l): l is NonNullable<typeof l> => !!l);
+    enrichments = await enrichMany(locs.map((l) => ({ zip: l.zip ?? null, county: l.county ?? null, state: l.state, latitude: l.latitude ?? null, longitude: l.longitude ?? null })));
+    hops.push({ stage: "ENRICH", ms: Date.now() - t0, detail: `${enrichments.size} locations via OpenFEMA + Open-Meteo (${Date.now() - tE}ms)` });
+    queryTrace.push(`[enrichment] ${enrichments.size} primary locations enriched (FEMA declarations, NFIP claims, weather extremes)`);
+  }
+
+  hops.push({ stage: "SCORE", ms: Date.now() - t0, detail: opts?.enrich ? "appetite engine + external risk factors" : "appetite engine" });
 
   const ranked: RankedSubmission[] = [];
-  for (const raw of policies) {
-    const policy = asRecord(raw);
-    if (!policy) continue;
-    const input = policyFromFederatoRecord(policy);
-    const result = scorePolicyAppetite(input);
+  for (const { policy, input } of inputs) {
+    const prim = primaryLocation(input.locations);
+    const enrichment = enrichments && prim ? enrichments.get(enrichmentKey({ zip: prim.zip ?? null, county: prim.county ?? null, state: prim.state, latitude: prim.latitude ?? null, longitude: prim.longitude ?? null })) ?? null : null;
+    const result = scorePolicyAppetite(input, { enrichment });
     const submission =
       policy.submission && typeof policy.submission === "object"
         ? (policy.submission as Record<string, unknown>)
@@ -163,5 +179,7 @@ export async function rankQueue(opts?: {
     propertyPolicies: policies.length,
     ranked,
     hops,
+    enriched: Boolean(opts?.enrich),
+    ...(opts?.withPolicies ? { policies } : {}),
   };
 }

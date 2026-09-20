@@ -20,13 +20,27 @@ packages/liveavatar    HeyGen LiveAvatar LITE: session, PCM pump, in-page camera
 packages/voice         ElevenLabs streaming TTS -> PCM 24 kHz + cached fillers (built)
 ```
 
-## Federato pack (feat/federato-browserbase)
+## Federato pack — the underwriting agent (prize track)
 
-- Pure scoring in `packages/brain/src/federato` — never import fetch there.
-- Network + Browserbase only in `apps/backend`.
+- Pure scoring in `packages/brain/src/federato` — never import fetch there. `appetite.ts` is the
+  2025 table (renewal = Not Acceptable, new = Acceptable); `enrichment.ts` scores outside risk data
+  as extra factors; `queryGuide.ts` renders the live schema for the planner, validates payloads
+  ($elemMatch through arrays, expand-then-filter, select shapes) and collapses per-record rows into
+  groups; `guidelines.ts` is the table + glossary as data.
+- Network only in `apps/backend`: `federatoClient.ts` (auth, schema, query), `enrichment.ts`
+  (OpenFEMA declarations by county, NFIP claims by zip, Open-Meteo extremes; cached on disk),
+  `federatoQuery.ts` (agentic: goal → Gemini planner with compact schema + query rules → validate
+  → run → re-plan on empty/error → collapse groups; every attempt is traced), `federatoTools.ts`
+  (the goose's tools: `federato_queue`, `federato_account`, `federato_query`, `federato_portfolio`,
+  `federato_enrich`, `federato_guidelines`; tool docs live there and feed the brain prompt).
+- The brain can chain tools: `narrateToolResult` may return `nextTool`; `runToolChain` in
+  `tools.ts` runs it (cap 3) for both chat and meeting; traces land in session notes ("why:").
+- The API's `over` returns one row per record — never trust its grouping; `collapseGroups` does it.
+- Direct routes for judges/UW tab: `POST /api/federato/query {goal}`, `POST /api/federato/tool
+  {name, query}`, `GET /api/federato/portfolio?by=`, `GET /api/federato/enrich/:policyId`,
+  `GET /api/federato/rank?enrich=1`, `GET /api/federato/deep-dive/:id?enrich=1`.
 - Dashboard UW tab polls `NEXT_PUBLIC_BACKEND_URL` (default `:8787`).
 - Camera/plus1 is teammate-owned; screenshare = Present Browserbase live-view tab.
-
 
 ## Send a plus1 (live transcription)
 

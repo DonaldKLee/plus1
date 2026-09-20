@@ -6,13 +6,12 @@
  */
 
 import type { Page } from "playwright-core";
-import { env, envOptional } from "./env.js";
+import { envOptional } from "./env.js";
 import { plus1Config } from "./plus1Config.js";
-import { rankQueue } from "./rank.js";
+import { FEDERATO_TOOL_DOCS } from "./federatoTools.js";
+import { generateJson } from "./gemini.js";
 
-// gemini-flash-latest currently maps to gemini-3.8-flash (only 20 free req/day).
-// flash-lite-latest has far more free headroom and is plenty for classification.
-const DECIDE_MODEL = process.env.GEMINI_BRAIN_MODEL || "gemini-flash-lite-latest";
+export { generateJson, DECIDE_MODEL } from "./gemini.js";
 
 export type ActionKind = "speak" | "chat" | "tool" | "none";
 
@@ -131,14 +130,8 @@ interface ToolSpec {
 function toolCatalog(access: ToolAccess): ToolSpec[] {
   const tools: ToolSpec[] = [];
   if (access.federato !== false) {
-    tools.push({
-      name: "federato_appetite",
-      doc: `federato_appetite(query?) — the current underwriting queue ranked by appetite (which submissions to quote / refer / decline). Optional query to focus on an account, line of business, or decision.`,
-    });
-    tools.push({
-      name: "federato_account",
-      doc: `federato_account(query) — deep-dive ONE account or policy by name or policy number: the appetite decision, the reason, and any red flags / contradictions in the file.`,
-    });
+    // The underwriting toolset (see federatoTools.ts). Docs live next to the implementations.
+    for (const t of FEDERATO_TOOL_DOCS) tools.push({ name: t.name, doc: t.doc });
   }
   if (access.intact) {
     // Intact is a Canadian personal & commercial insurer (NOT the "Intacct" accounting app).
@@ -216,6 +209,25 @@ ${opts.tools.map((t) => `  - ${t.doc}`).join("\n")}`
       ? `\nWHAT TO REMEMBER — standing context and instructions. Honor EVERY item on EVERY turn, even after it has scrolled out of the transcript below:
 ${opts.memory.map((m) => `  - ${m}`).join("\n")}\n`
       : "";
+  const underwriterNote = opts.tools.some((t) => t.name.startsWith("federato_"))
+    ? `
+YOU THINK LIKE AN UNDERWRITING PROFESSIONAL. When the room talks about a submission, account, broker, state, hazard, premium, TIV, losses or appetite, that's your lane:
+- Ground every claim in a tool result. Never guess a decision, a score or a number: pull it (federato_account for one account, federato_queue for the queue, federato_query for anything else in the data, federato_portfolio for existing exposure, federato_enrich for outside risk data).
+- Explain like an underwriter: appetite fit → the one or two factors that decide it → recommendation (quote / refer / investigate / decline). Name contradictions plainly ("premium's in target but construction fails").
+- When a call is borderline, say what data would settle it and offer to pull it.
+- A "renewal" is out of appetite under the 2025 guidelines; new business is what we want.
+
+WORKED EXAMPLES (what someone says → what you do, in the same turn):
+- "what's in the queue today?" / "anything worth looking at?" → action="tool", tool.name="federato_queue", say="pulling the queue now, one sec".
+- "anything in florida?" / "show me the declines" → federato_queue with tool.query="FL" / "decline".
+- "pull up harbor point" / "what's the story on policy 1001?" → federato_account, tool.query="harbor point" / "1001", say="grabbing the harbor point file".
+- "is flood a problem there?" / "what does the outside data say?" → federato_enrich with the account just discussed, say="checking fema and the weather record for that address".
+- "how exposed are we already to flood / to that broker / in california?" → federato_portfolio, tool.query="hazard" / "broker" / "state".
+- "how many active property policies do we have in california over fifty million?" / "which brokers send us the most declines?" / "claims over a hundred k by cause?" → federato_query with the question as tool.query, say="let me run that against the book".
+- "what's the premium rule again?" / "what does TIV mean?" → federato_guidelines, tool.query="premium" / "TIV".
+- After a tool: lead with the decision or the number, then the ONE factor that drives it, then the next step ("cross continental's a decline: premium's a hundred eighty-eight over the one seventy-five cap and the buildings are seventy-eight. want the next one?").
+`
+    : "";
   const mutedNote = opts.muted
     ? `\nYou are in CHAT-ONLY mode right now: someone asked you to stop talking and use the chat. Keep participating exactly as before, but your words go to the meeting chat, not out loud. Stay this way until someone tells you to talk / unmute again.\n`
     : "";
@@ -248,7 +260,7 @@ GUARDRAILS:
 - Never stall silently. If you're working on something, say so.
 - Deflect off-topic noise. If the room drifts onto something you're not here to advise on, give it a beat and steer back to the active task.
 - Be aware other people are in the room. Only speak when you're addressed or when your specific expertise or action is clearly what's needed. When humans are working something out between themselves, stay out of it (action="none").
-${memorySection}${mutedNote}${renderState(opts.state)}
+${memorySection}${underwriterNote}${mutedNote}${renderState(opts.state)}
 Act when it is useful and welcome:
 - Someone addresses you ("${name}" or "plus one").
 - Someone asks an open question you or a tool can helpfully answer.
@@ -361,65 +373,6 @@ function buildResponseSchema(tools: ToolSpec[]) {
   return schema;
 }
 
-/**
- * One structured-JSON Gemini call, with the retry policy both brain calls share.
- * Retries 5xx and per-minute 429s. A per-DAY quota 429 won't clear by retrying,
- * so it surfaces as a distinct `quota` error the caller can report once.
- */
-async function generateJson(
-  systemText: string,
-  userText: string,
-  schema: Record<string, unknown>,
-  temperature = 0.2,
-): Promise<Record<string, unknown>> {
-  const key = env("GEMINI_API_KEY");
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${DECIDE_MODEL}:generateContent?key=${key}`;
-  const body = {
-    systemInstruction: { parts: [{ text: systemText }] },
-    contents: [{ role: "user", parts: [{ text: userText }] }],
-    generationConfig: { temperature, responseMimeType: "application/json", responseSchema: schema },
-  };
-
-  let res: Response | undefined;
-  let lastErr = "";
-  for (let attempt = 0; attempt < 3; attempt++) {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (res.ok) break;
-    const bodyText = await res.text();
-    lastErr = `brain ${res.status}: ${bodyText.slice(0, 160)}`;
-    if (res.status === 429 && /PerDay|RequestsPerDay/i.test(bodyText)) {
-      const err = new Error("Gemini brain quota exhausted for today (free tier).") as Error & {
-        quota?: boolean;
-      };
-      err.quota = true;
-      throw err;
-    }
-    const transient = res.status === 429 || res.status >= 500;
-    if (!transient) throw new Error(lastErr);
-    await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
-    res = undefined;
-  }
-  if (!res) {
-    const err = new Error(lastErr || "brain unavailable") as Error & { transient?: boolean };
-    err.transient = true;
-    throw err;
-  }
-
-  const json = (await res.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
-  };
-  const raw = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
-  try {
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
 /** Ask Gemini whether to act on the current transcript window. */
 export async function decideAction(
   transcript: string,
@@ -479,6 +432,12 @@ export interface ToolReply {
   say: string;
   remember?: string[];
   state?: StateUpdate;
+  /**
+   * A follow-up tool call the model wants to make BEFORE it can give a full answer
+   * (e.g. the queue named an account → pull the account; the account is in Florida with a
+   * flood tag → pull outside risk data). The runner executes it and narrates again, up to a cap.
+   */
+  nextTool?: { name: string; query?: string; reason?: string };
 }
 
 const TOOL_REPLY_SCHEMA: Record<string, unknown> = {
@@ -487,6 +446,10 @@ const TOOL_REPLY_SCHEMA: Record<string, unknown> = {
     say: { type: "string" },
     remember: { type: "array", items: { type: "string" } },
     state: STATE_SCHEMA,
+    nextTool: {
+      type: "object",
+      properties: { name: { type: "string" }, query: { type: "string" }, reason: { type: "string" } },
+    },
   },
   required: ["say"],
 };
@@ -515,6 +478,8 @@ export async function narrateToolResult(opts: {
   muted?: boolean;
   state?: MeetingState;
   announced?: string;
+  /** How many follow-up tools already ran for this question (caps the chain). */
+  chainDepth?: number;
 }): Promise<ToolReply> {
   const name = opts.name?.trim() || plus1_NAME;
   const base = buildSystemPrompt({
@@ -534,7 +499,9 @@ RIGHT NOW you are DELIVERING A TOOL RESULT. You already told the room you were g
 - If the tool failed or came back empty, say so plainly in one line and offer the next thing you can try. Never pretend it worked.
 - End by driving the next step: the single most useful next question, or a confirmation of the action you'd take next.
 - Do not repeat the line you already said before running the tool.
-- Update "state": add what the tool established to state.collected, and put what you still need in state.missing.`;
+- Update "state": add what the tool established to state.collected, and put what you still need in state.missing.
+- DEEPEN WHEN IT MATTERS: if this result points at ONE more lookup that would materially change or complete the answer (the queue surfaced an account worth a deep dive; an account sits in a flood/hurricane-tagged location and the outside data isn't in yet; a number needs the portfolio context), set "nextTool" with the tool name and its argument, and make "say" the short interim line that goes with it ("top of the list is harbor point — let me pull the file"). Only chain when it earns its keep; otherwise leave nextTool empty and give the answer.${opts.chainDepth ? `
+You have already chained ${opts.chainDepth} follow-up tool call(s) on this question${opts.chainDepth >= 2 ? "; this is the last one — no more nextTool, deliver the answer" : ""}.` : ""}`;
 
   const userText = `Recent transcript:
 ${opts.transcript}
@@ -550,14 +517,22 @@ Now say the answer to the room.`;
       say?: string;
       remember?: unknown;
       state?: unknown;
+      nextTool?: { name?: unknown; query?: unknown; reason?: unknown };
     };
     const say = typeof parsed.say === "string" ? parsed.say.trim() : "";
+    const allowed = new Set(toolCatalog(opts.access ?? {}).map((t) => t.name));
+    const nt = parsed.nextTool;
+    const nextTool =
+      nt && typeof nt.name === "string" && allowed.has(nt.name) && (opts.chainDepth ?? 0) < 2
+        ? { name: nt.name, query: typeof nt.query === "string" ? nt.query : undefined, reason: typeof nt.reason === "string" ? nt.reason : undefined }
+        : undefined;
     return {
       say: say || clampResult(opts.result, 600),
       remember: Array.isArray(parsed.remember)
         ? parsed.remember.filter((r): r is string => typeof r === "string" && r.trim().length > 0)
         : undefined,
       state: parseStateUpdate(parsed.state),
+      nextTool,
     };
   } catch {
     // Quota gone or Gemini down: read the tool's own words rather than go silent.
@@ -595,20 +570,7 @@ export async function postToMeetChat(page: Page, message: string): Promise<boole
 
 // ── Action: tools ──────────────────────────────────────────────────────────
 
-export async function runTool(name: string, query?: string): Promise<string> {
-  if (name === "federato_appetite") {
-    try {
-      const { ranked } = await rankQueue({ refresh: false });
-      const top = ranked?.slice(0, 3) ?? [];
-      if (top.length === 0) return `No Federato submissions are currently in the queue to assess${query ? ` for "${query}"` : ""}.`;
-      const lines = top
-        .map((r) => `${r.accountName ?? r.policyId}: ${r.decision} (score ${Math.round((r.score ?? 0) * 100) / 100})`)
-        .join("; ");
-      return `Top submissions by appetite${query ? ` for "${query}"` : ""}: ${lines}.`;
-    } catch (e) {
-      return `Could not reach Federato appetite data: ${(e as Error).message}`;
-    }
-  }
+export async function runTool(name: string, _query?: string): Promise<string> {
   return `Unknown tool: ${name}`;
 }
 

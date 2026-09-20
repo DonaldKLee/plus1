@@ -4,6 +4,8 @@ import cors from "cors";
 import { envOptional } from "./env.js";
 import { cacheSchemaAndPolicies } from "./federatoClient.js";
 import { rankQueue } from "./rank.js";
+import { agenticQuery } from "./federatoQuery.js";
+import { runFederatoTool } from "./federatoTools.js";
 import { deepDivePolicy } from "./deepDive.js";
 import {
   openWorkSessionForScreenshare,
@@ -78,8 +80,44 @@ app.post("/api/federato/cache", async (_req, res) => {
 app.get("/api/federato/rank", async (req, res) => {
   try {
     const refresh = req.query.refresh === "1" || req.query.refresh === "true";
-    const result = await rankQueue({ refresh });
+    const enrich = req.query.enrich === "1" || req.query.enrich === "true";
+    const result = await rankQueue({ refresh, enrich });
     res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// ── The agent's Federato tools, callable directly (the UW tab, curl, judges) ──
+app.post("/api/federato/query", async (req, res) => {
+  try {
+    const goal = typeof req.body?.goal === "string" ? req.body.goal.trim() : "";
+    if (!goal) { res.status(400).json({ error: "body.goal (plain english) required" }); return; }
+    res.json(await agenticQuery(goal));
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+app.get("/api/federato/enrich/:policyId", async (req, res) => {
+  try {
+    const out = await runFederatoTool("federato_enrich", { query: String(req.params.policyId) });
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+app.get("/api/federato/portfolio", async (req, res) => {
+  try {
+    res.json(await runFederatoTool("federato_portfolio", { query: typeof req.query.by === "string" ? req.query.by : undefined }));
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+app.post("/api/federato/tool", async (req, res) => {
+  try {
+    const name = typeof req.body?.name === "string" ? req.body.name : "";
+    if (!name.startsWith("federato_")) { res.status(400).json({ error: "body.name must be a federato_* tool" }); return; }
+    res.json(await runFederatoTool(name, { query: typeof req.body?.query === "string" ? req.body.query : undefined }));
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -88,7 +126,8 @@ app.get("/api/federato/rank", async (req, res) => {
 app.get("/api/federato/deep-dive/:policyId?", async (req, res) => {
   try {
     const policyId = Number(req.params.policyId ?? 1001);
-    const { deepDive, hops } = await deepDivePolicy(policyId);
+    const enrich = req.query.enrich !== "0";
+    const { deepDive, hops } = await deepDivePolicy(policyId, { enrich });
     const browse =
       req.query.browse === "0"
         ? null

@@ -5,7 +5,7 @@ import {
   scorePremium,
   scoreTiv,
   scoreLineOfBusiness,
-} from "./appetite.ts";
+} from "./appetite.js";
 
 test("property LOB is acceptable; cyber is not", () => {
   assert.equal(scoreLineOfBusiness("property").tier, "acceptable");

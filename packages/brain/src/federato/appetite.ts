@@ -8,6 +8,7 @@ import type {
   FactorScore,
   UnderwriteDecision,
 } from "@plus1/protocol";
+import { scoreEnrichment, type HazardEnrichment } from "./enrichment.js";
 
 export const TARGET_STATES = ["OH", "PA", "MD", "CO", "CA", "FL"] as const;
 export const ACCEPTABLE_STATES = [
@@ -52,6 +53,7 @@ export interface LocationInput {
   hazardTags?: string[];
   address?: string;
   city?: string;
+  county?: string;
   zip?: string;
   latitude?: number | null;
   longitude?: number | null;
@@ -131,17 +133,18 @@ export function scoreBusinessType(businessType: string | null): FactorScore {
       factor: "submission_type",
       tier: "missing",
       value: "unknown",
-      rule: "New = Acceptable; Renewal = Target",
+      rule: "New = Acceptable; Renewal = Not Acceptable",
       points: 0,
     };
   }
+  // 2025 sample guidelines: New business = Acceptable; Renewal business = Not Acceptable.
   if (v === "renewal") {
     return {
       factor: "submission_type",
-      tier: "target",
+      tier: "not_acceptable",
       value: v,
-      rule: "Renewal is Target",
-      points: 2,
+      rule: "Renewal business is Not Acceptable (new business only)",
+      points: -3,
     };
   }
   if (v === "new") {
@@ -438,7 +441,12 @@ export interface AppetiteResult {
   tiv: number;
 }
 
-export function scorePolicyAppetite(input: PolicyScoreInput): AppetiteResult {
+export interface ScoreOptions {
+  /** External risk data for the primary location (OpenFEMA / Open-Meteo). Adds factors when present. */
+  enrichment?: HazardEnrichment | null;
+}
+
+export function scorePolicyAppetite(input: PolicyScoreInput, opts: ScoreOptions = {}): AppetiteResult {
   const primaryState = primaryStateByTiv(input.locations);
   const tiv = totalTiv(input.locations);
   const buildings = allBuildings(input.locations);
@@ -474,6 +482,9 @@ export function scorePolicyAppetite(input: PolicyScoreInput): AppetiteResult {
       points: -3,
     });
   }
+
+  // External enrichment (optional): real-world hazard signals for the primary location.
+  if (opts.enrichment) factors.push(...scoreEnrichment(opts.enrichment));
 
   const score = factors.reduce((s, f) => s + f.points, 0);
   const maxScore = factors.length * 2;

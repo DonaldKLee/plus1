@@ -3,7 +3,7 @@
  * and the chat harness — so "talking to Bob" in chat exercises exactly the same
  * tool path as a real meeting.
  */
-import { runTool, type Decision, type ToolAccess } from "./agentBrain.js";
+import { narrateToolResult, runTool, type Decision, type MeetingState, type ToolAccess, type ToolReply } from "./agentBrain.js";
 import { runFileTool, READ_TOOLS, WRITE_TOOLS, type FileTool } from "./fileTools.js";
 import { runCommand } from "./shellTools.js";
 import { runFederatoTool } from "./federatoTools.js";
@@ -18,6 +18,8 @@ export interface ToolResult {
   quote?: QuoteResult;
   pdfUrl?: string;
   nextStep?: NextStep;
+  /** Reasoning trace for the operator: which queries ran, which sources answered. */
+  trace?: string[];
 }
 
 const t = (text: string): ToolResult => ({ text });
@@ -29,7 +31,7 @@ export async function executeTool(call: ToolCall, access: ToolAccess): Promise<T
   if (name.startsWith("federato_")) {
     if (access.federato === false) return t("Federato is turned off right now.");
     return runFederatoTool(name, { query: call.query })
-      .then((text) => t(text))
+      .then((r) => ({ text: r.text, trace: r.trace }))
       .catch((e: Error) => t(`Federato error: ${e.message}`));
   }
 
@@ -58,4 +60,92 @@ export async function executeTool(call: ToolCall, access: ToolAccess): Promise<T
   }
 
   return t(await runTool(name, call.query));
+}
+
+
+// ── Tool chains: announce → run → narrate → (maybe) one more tool → … ──────
+// The narrating turn may ask for a follow-up lookup (ToolReply.nextTool). This runs the
+// chain with a hard cap so a meeting never turns into an unbounded research project, and
+// hands every step back to the caller (chat message, spoken line, operator note).
+
+export interface ChainStep {
+  call: ToolCall;
+  args: string;
+  announced?: string;
+  result: ToolResult;
+  reply: ToolReply;
+}
+
+export interface ChainContext {
+  transcript: () => string;
+  name: string;
+  autonomy: number;
+  channel?: "meeting" | "chat";
+  memory: string[];
+  muted?: boolean;
+  state: MeetingState;
+}
+
+export interface ChainHooks {
+  /** Say the interim line before a follow-up tool runs (voice or chat). */
+  announce?: (say: string, step: number) => Promise<void>;
+  /** A tool finished (result in hand, not yet narrated). */
+  onResult?: (step: ChainStep) => void | Promise<void>;
+}
+
+export const MAX_CHAIN_STEPS = 3;
+
+export function argsOf(call: ToolCall): string {
+  return call.command ?? call.path ?? call.query ?? (call.details ? JSON.stringify(call.details) : "");
+}
+
+/**
+ * Execute `first` (already announced by the caller), narrate it, and keep going while the
+ * narration asks for a follow-up. Returns every step; the last step's reply.say is the
+ * answer to deliver.
+ */
+export async function runToolChain(first: ToolCall, access: ToolAccess, ctx: ChainContext, hooks: ChainHooks = {}, announced?: string): Promise<ChainStep[]> {
+  const steps: ChainStep[] = [];
+  let call: ToolCall = first;
+  let lastAnnounced = announced;
+  for (let depth = 0; depth < MAX_CHAIN_STEPS; depth++) {
+    const args = argsOf(call);
+    let result: ToolResult;
+    try {
+      result = await executeTool(call, access);
+    } catch (e) {
+      result = { text: `the ${call.name} tool failed: ${(e as Error).message}` };
+    }
+    let reply: ToolReply;
+    try {
+      reply = await narrateToolResult({
+        toolName: call.name,
+        args,
+        result: result.text,
+        transcript: ctx.transcript(),
+        name: ctx.name,
+        autonomy: ctx.autonomy,
+        access,
+        channel: ctx.channel,
+        memory: ctx.memory,
+        muted: ctx.muted,
+        state: ctx.state,
+        announced: lastAnnounced,
+        chainDepth: depth,
+      });
+    } catch (e) {
+      reply = { say: result.text }; // never swallow the answer because phrasing failed
+    }
+    const step: ChainStep = { call, args, announced: lastAnnounced, result, reply };
+    steps.push(step);
+    await hooks.onResult?.(step);
+
+    const next = reply.nextTool;
+    if (!next || depth === MAX_CHAIN_STEPS - 1) break;
+    // The interim line is the announcement for the next tool.
+    if (reply.say.trim() && hooks.announce) await hooks.announce(reply.say.trim(), depth + 1);
+    lastAnnounced = reply.say.trim() || undefined;
+    call = { name: next.name, query: next.query };
+  }
+  return steps;
 }

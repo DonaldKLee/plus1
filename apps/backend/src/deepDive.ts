@@ -1,8 +1,11 @@
 import {
+  describeEnrichment,
   policyFromFederatoRecord,
   scorePolicyAppetite,
+  type HazardEnrichment,
 } from "@plus1/brain";
 import type { DeepDiveResult, MindHop } from "@plus1/protocol";
+import { enrichLocation } from "./enrichment.js";
 import { loadCachedPolicies, runQuery } from "./federatoClient.js";
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -11,6 +14,7 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 
 export async function deepDivePolicy(
   policyId = 1001,
+  opts: { enrich?: boolean } = {},
 ): Promise<{ deepDive: DeepDiveResult; hops: MindHop[] }> {
   const hops: MindHop[] = [];
   const t0 = Date.now();
@@ -30,6 +34,7 @@ export async function deepDivePolicy(
         insured: true,
         claims: true,
         submission: true,
+        producer: { broker: true },
         exposure_units: { location: { buildings: true } },
       },
       pagination: { limit: 1 },
@@ -45,8 +50,6 @@ export async function deepDivePolicy(
   }
 
   const input = policyFromFederatoRecord(policy);
-  const scored = scorePolicyAppetite(input);
-  hops.push({ stage: "SCORE", ms: Date.now() - t0, detail: scored.decision });
 
   // Pick primary location for browse — prefer FL / flood-tagged Harbor Point style
   const locs = input.locations;
@@ -54,6 +57,20 @@ export async function deepDivePolicy(
     locs.find((l) => (l.hazardTags ?? []).includes("flood")) ||
     locs.find((l) => l.state === "FL") ||
     locs.sort((a, b) => b.tiv - a.tiv)[0];
+
+  // Appetite rules alone, then with outside risk data for the primary location (optional).
+  const base = scorePolicyAppetite(input);
+  let enrichment: HazardEnrichment | null = null;
+  if (opts.enrich && preferred) {
+    const tE = Date.now();
+    enrichment = await enrichLocation({
+      zip: preferred.zip ?? null, county: preferred.county ?? null, state: preferred.state,
+      latitude: preferred.latitude ?? null, longitude: preferred.longitude ?? null,
+    });
+    hops.push({ stage: "ENRICH", ms: Date.now() - t0, detail: `${enrichment.sources.length}/3 sources answered (${Date.now() - tE}ms)` });
+  }
+  const scored = enrichment ? scorePolicyAppetite(input, { enrichment }) : base;
+  hops.push({ stage: "SCORE", ms: Date.now() - t0, detail: enrichment ? `${scored.decision} (rules alone: ${base.decision})` : scored.decision });
 
   const address = [
     preferred?.address,
@@ -87,9 +104,19 @@ export async function deepDivePolicy(
       `Loss total ${scored.factors.find((f) => f.factor === "loss_value")?.value} exceeds $100k hard line.`,
     );
   }
+  if (scored.factors.some((f) => f.factor === "submission_type" && f.tier === "not_acceptable")) {
+    contradictionNotes.push("Renewal business is outside the 2025 appetite (new business only).");
+  }
   if ((preferred?.hazardTags ?? []).includes("flood")) {
     contradictionNotes.push(
-      `Broker file tags ${preferred?.address} with flood/hurricane — verify on FEMA NFHL live.`,
+      enrichment?.nfipClaims != null
+        ? `Broker file tags ${preferred?.address} with flood/hurricane; OpenFEMA shows ${enrichment.nfipClaims} NFIP claims in zip ${enrichment.zip} and ${enrichment.declarationsSince2015 ?? "?"} county declarations since 2015.`
+        : `Broker file tags ${preferred?.address} with flood/hurricane — verify on FEMA NFHL live.`,
+    );
+  }
+  if (enrichment && scored.decision !== base.decision) {
+    contradictionNotes.push(
+      `Appetite rules alone say ${base.decision.toUpperCase()}; outside risk data moves it to ${scored.decision.toUpperCase()}.`,
     );
   }
 
@@ -112,6 +139,9 @@ ${factorLines}
 ## Deep-dive location
 ${address || "n/a"}  
 Hazards: ${(preferred?.hazardTags ?? []).join(", ") || "none listed"}
+
+## External risk data
+${enrichment ? `${describeEnrichment(enrichment)}  \nSources: ${enrichment.sources.join(", ") || "none answered"}. Rules alone: **${base.decision.toUpperCase()}** (${base.score}/${base.maxScore}); with outside data: **${scored.decision.toUpperCase()}** (${scored.score}/${scored.maxScore}).` : "not pulled (enrich=1 to include OpenFEMA + Open-Meteo)"}
 
 ## Contradictions / subjectivities
 ${contradictionNotes.map((n) => `- ${n}`).join("\n") || "- none"}
@@ -139,6 +169,7 @@ ${contradictionNotes.map((n) => `- ${n}`).join("\n") || "- none"}
     factors: scored.factors,
     memoMarkdown,
     contradictionNotes,
+    ...(enrichment ? { enrichment, decisionWithoutEnrichment: base.decision } : {}),
   };
 
   return { deepDive, hops };

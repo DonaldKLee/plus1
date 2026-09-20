@@ -32,7 +32,7 @@ import {
   type MeetingState,
   type ToolAccess,
 } from "./agentBrain.js";
-import { executeTool } from "./tools.js";
+import { runToolChain } from "./tools.js";
 import {
   getplus1Settings,
   getMeeting,
@@ -855,49 +855,51 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
     // Graceful delay: a cached filler covers the dead air while the tool runs,
     // so the room never hears silence between the announcement and the answer.
     const filler = announced ? undefined : startFiller(s);
-    let result: string;
-    try {
-      ({ text: result } = await executeTool(t, access));
-    } catch (e) {
-      result = `the ${t.name} tool failed: ${(e as Error).message}`;
-    }
-    await filler;
-    note(s, `Tool result: ${result}`);
-    recordCompletedAction(s.state, `${t.name}(${args}) → ${result.slice(0, 160)}`);
 
-    // THE POINT OF ALL THIS: report the result back to the room. A second brain
-    // turn phrases the raw tool output as something Bob actually says, and the
-    // spoken line lands in s.lines so the next turn can see what he reported.
-    let reply: string;
-    try {
-      const narrated = await narrateToolResult({
-        toolName: t.name,
-        args,
-        result,
-        transcript: transcriptWindow(s),
+    // Run the chain: tool → narrate → maybe a follow-up tool (the narration asks for it)
+    // → narrate again, capped. Every result and every query trace lands in the notes so
+    // the operator can see WHY the goose looked where it looked.
+    let lastResult = "";
+    const steps = await runToolChain(
+      t,
+      access,
+      {
+        transcript: () => transcriptWindow(s),
         name: nameOf(s),
         autonomy: autonomyOf(s),
-        access,
+        channel: "meeting",
         memory: s.memory,
         muted: s.muted,
         state: s.state,
-        announced,
-      });
-      rememberFrom(s, narrated.remember);
-      applyStateUpdate(s.state, narrated.state);
-      emit(s, "state", s.state);
-      reply = narrated.say.trim() || result;
-    } catch (e) {
-      // Never swallow the answer because the phrasing call failed.
-      note(s, `narrate failed (${(e as Error).message}); reading the raw result`);
-      reply = result;
-    }
+      },
+      {
+        announce: async (say) => {
+          note(s, `Follow-up: "${say}"`);
+          try { await sayInRoom(s, say); } catch (e) { note(s, `announce failed (${(e as Error).message})`); }
+        },
+        onResult: (step) => {
+          lastResult = step.result.text;
+          note(s, `Tool result (${step.call.name}): ${step.result.text.slice(0, 400)}`);
+          for (const line of step.result.trace ?? []) note(s, `  why: ${line}`);
+          recordCompletedAction(s.state, `${step.call.name}(${step.args}) → ${step.result.text.slice(0, 160)}`);
+          rememberFrom(s, step.reply.remember);
+          applyStateUpdate(s.state, step.reply.state);
+          emit(s, "state", s.state);
+          if (step.reply.nextTool) note(s, `Deepening: ${step.reply.nextTool.name}(${step.reply.nextTool.query ?? ""})${step.reply.nextTool.reason ? ` — ${step.reply.nextTool.reason}` : ""}`);
+        },
+      },
+      announced,
+    );
+    await filler;
+    const last = steps[steps.length - 1];
+    const reply = last?.reply.say.trim() || lastResult;
+    const result = lastResult;
 
     const said = await sayInRoom(s, reply);
 
-    // A spoken summary can't carry a breakdown (a quote's coverage lines, a file
-    // listing). Drop the detail in the chat too, so nobody has to ask for it —
-    // but only when it's genuinely more than what was just said out loud.
+    // A spoken summary can't carry a breakdown (a queue, a factor list). Drop the detail
+    // in the chat too, so nobody has to ask for it — but only when it's genuinely more
+    // than what was just said out loud.
     const detailed = result.includes("\n") || result.length > 220;
     if (detailed && page && result.trim() !== reply.trim()) {
       await postToMeetChat(page, `${nameOf(s)} — ${result}`);

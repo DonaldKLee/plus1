@@ -16,7 +16,7 @@ import {
   type MeetingState,
   type ToolAccess,
 } from "./agentBrain.js";
-import { executeTool } from "./tools.js";
+import { runToolChain } from "./tools.js";
 import type { NextStep } from "./intactTools.js";
 import type { SessionConfig } from "./meetTranscribe.js";
 import { getplus1Settings } from "./store.js";
@@ -147,40 +147,45 @@ export async function sendChatMessage(
 
   if (decision.action === "tool" && decision.tool?.name) {
     const call = decision.tool;
-    const args = call.command ?? call.path ?? call.query ?? (call.details ? JSON.stringify(call.details) : "");
-    // Announce first (never a silent tool call), then run it, then show the result.
+    // Announce first (never a silent tool call), then run the chain: tool → narrate →
+    // maybe one follow-up tool → … Each step lands in the chat as it happens.
     const announced = decision.say?.trim();
     if (announced) out.push(msg("bob", announced));
 
-    const { text, quote, pdfUrl, nextStep } = await executeTool(call, access);
-    recordCompletedAction(c.state, `${call.name}(${args}) → ${text.slice(0, 160)}`);
-
-    const m = quote ? msg("bob", text, "quote", call.name) : msg("bob", text, "tool", call.name);
-    if (quote) m.quote = quote;
-    if (pdfUrl) m.pdfUrl = pdfUrl;
-    if (nextStep) m.nextStep = nextStep;
-    out.push(m);
-
-    // Same follow-up turn the meeting runner does: put the tool's answer into
-    // Bob's own words and drive the next step, instead of dropping a raw string.
-    const narrated = await narrateToolResult({
-      toolName: call.name,
-      args,
-      result: text,
-      transcript: transcriptOf(c),
-      name: nameOf(c.config),
-      autonomy: autonomyOf(c.config),
+    const steps = await runToolChain(
+      call,
       access,
-      channel: "chat",
-      memory: c.memory,
-      state: c.state,
+      {
+        transcript: () => transcriptOf(c),
+        name: nameOf(c.config),
+        autonomy: autonomyOf(c.config),
+        channel: "chat",
+        memory: c.memory,
+        muted: false,
+        state: c.state,
+      },
+      {
+        announce: async (say) => { out.push(msg("bob", say)); },
+        onResult: (step) => {
+          recordCompletedAction(c.state, `${step.call.name}(${step.args}) → ${step.result.text.slice(0, 160)}`);
+          if (step.result.quote) {
+            const m = msg("bob", step.result.text, "quote", step.call.name);
+            m.quote = step.result.quote;
+            out.push(m);
+          } else {
+            const shown = step.result.trace?.length ? `${step.result.text}\n\n— how: ${step.result.trace.join(" · ")}` : step.result.text;
+            out.push(msg("bob", shown, "tool", step.call.name));
+          }
+          remember(c, step.reply.remember);
+          applyStateUpdate(c.state, step.reply.state);
+        },
+      },
       announced,
-    });
-    remember(c, narrated.remember);
-    applyStateUpdate(c.state, narrated.state);
-    const reply = narrated.say.trim();
+    );
+    const last = steps[steps.length - 1];
+    const reply = last?.reply.say.trim() ?? "";
     // Skip it only if the model just echoed the raw tool string back.
-    if (reply && reply !== text.trim()) out.push(msg("bob", reply));
+    if (reply && reply !== last?.result.text.trim()) out.push(msg("bob", reply));
   } else {
     const reply = (decision.say || decision.chatMessage || "").trim();
     if (reply) out.push(msg("bob", reply));

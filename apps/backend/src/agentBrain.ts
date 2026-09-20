@@ -173,7 +173,20 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
   if (access.docs) {
     tools.push({
       name: "doc_pdf",
-      doc: `doc_pdf — turn text into a real PDF someone can download, open from a link, or be emailed (meeting notes, a recap, action items, a summary, a one-pager). Call it whenever someone asks for "notes", "a writeup", "a summary", "a doc", or "a PDF". You WRITE the content yourself from the meeting — don't ask them to dictate it. tool.details: title, subtitle (optional, e.g. the date or meeting name), body (the full document text — markdown works: # headings, - bullets, 1. numbered lists, --- rules), filename (optional). NEVER read the resulting link out loud, character by character or otherwise — it's posted into the meeting chat automatically. Just say it's in the chat.`,
+      doc: `doc_pdf — turn text into a real PDF someone can download, open from a link, or be emailed (meeting notes, a recap, action items, a summary, a one-pager, a comparison). Call it whenever someone asks for "notes", "a writeup", "a summary", "a doc", or "a PDF". You WRITE the content yourself from the meeting — don't ask them to dictate it.
+
+COVER WHAT WAS ASKED FOR. Re-read the request and put every single thing it named in the document. If they asked for pricing, the prices are in it. If they asked for next steps, the owners and dates are in it. Never write "TBD", "[insert]", "to be confirmed" or a placeholder — use the real value from the conversation, or leave that line out.
+
+CARRY THE NUMBERS. Every figure, price, date, percentage, deadline, limit, deductible, count and name that came up goes in verbatim — do not round, do not summarize a number away, do not describe a number in words. Two or more comparable figures belong in a markdown table, never in a sentence.
+
+tool.details:
+- title — what this document is.
+- subtitle (optional) — the date, the meeting, or who it's for.
+- figures (optional but use it whenever numbers matter) — up to 6 key figures as [{label, value, note}], e.g. [{"label":"Annual premium","value":"$1,847","note":"12-month term"}]. These print large at the top, which is the first thing the reader looks for.
+- body — the full document in markdown. Supported and rendered properly: # / ## / ### headings, - bullets (and indented sub-bullets), 1. numbered lists, "- [ ] task" / "- [x] done" checklists for action items, | markdown | tables | with |---:| alignment for anything numeric, > callouts for a caveat, --- rules, **Term**: value lines for specs, and inline **bold**, *italic*, \`code\`, [label](url).
+- filename (optional).
+
+NEVER read the resulting link out loud, character by character or otherwise — it's posted into the meeting chat automatically. Just say it's in the chat.`,
     });
   }
   if (access.email) {
@@ -401,6 +414,15 @@ function buildResponseSchema(tools: ToolSpec[]) {
     if (tools.some((t) => t.name === "doc_pdf")) {
       Object.assign(detailProps, {
         title: str, subtitle: str, body: str, filename: str, footer: str,
+        // The key figures, set as data at the top of the page. Declared as a
+        // real array so the model stops burying numbers in prose.
+        figures: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { label: str, value: str, note: str },
+          },
+        },
       });
     }
     if (tools.some((t) => t.name.startsWith("email_"))) {

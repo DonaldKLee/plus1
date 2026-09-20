@@ -5,7 +5,7 @@
  * `details` the brain gathered into a DocSpec, the same way intactTools.ts does
  * for quote inputs.
  */
-import { renderDocPdf } from "./docPdf.js";
+import { renderDocPdf, type Figure } from "./docPdf.js";
 
 type Details = Record<string, unknown>;
 
@@ -22,6 +22,44 @@ export interface DocToolResult {
 
 /** Cap the body so a runaway generation can't produce a 900-page PDF. */
 const MAX_BODY = 60_000;
+
+/**
+ * The key figures, coerced out of whatever shape the model produced. Gemini is
+ * asked for `[{label, value, note}]`, but it also likes `{"Premium": "$142"}`
+ * and `["Premium: $142"]`, and a dropped number is the one failure this whole
+ * feature exists to prevent — so all three are accepted.
+ */
+function figuresOf(raw: unknown): Figure[] | undefined {
+  const out: Figure[] = [];
+
+  const push = (label?: string, value?: string, note?: string): void => {
+    const l = label?.toString().trim();
+    const v = value?.toString().trim();
+    if (l && v) out.push({ label: l.slice(0, 40), value: v.slice(0, 24), note: note?.toString().trim().slice(0, 60) });
+  };
+
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (typeof item === "string") {
+        const [label, ...rest] = item.split(":");
+        push(label, rest.join(":"));
+      } else if (item && typeof item === "object") {
+        const o = item as Record<string, unknown>;
+        push(
+          (o.label ?? o.name ?? o.key) as string,
+          (o.value ?? o.amount ?? o.figure) as string,
+          (o.note ?? o.detail ?? o.sub) as string,
+        );
+      }
+    }
+  } else if (raw && typeof raw === "object") {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (v !== null && typeof v !== "object") push(k, String(v));
+    }
+  }
+
+  return out.length ? out.slice(0, 6) : undefined;
+}
 
 export async function runDocTool(
   name: string,
@@ -42,6 +80,7 @@ export async function runDocTool(
       title,
       subtitle: strOf(d.subtitle),
       body: body.slice(0, MAX_BODY),
+      figures: figuresOf(d.figures),
       footer: strOf(d.footer),
       filename: strOf(d.filename) ?? title,
       meetingId: args.meetingId,

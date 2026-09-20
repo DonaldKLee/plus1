@@ -96,7 +96,7 @@ export const SERVERS: ServerMeta[] = [
     id: "intact",
     name: "Intact",
     summary:
-      "Conversational car + tenant insurance quoting — Bob gathers what's needed and returns an estimate with coverage recommendations.",
+      "Personal car and tenant quotes. Quote PDFs from this path say Intact, never Federato.",
     tile: { kind: "brand", src: "/brands/intact.png", fit: "contain", bg: "#ffffff" },
   },
   {
@@ -111,13 +111,6 @@ export const SERVERS: ServerMeta[] = [
     summary:
       "Generic notes PDFs (off by default). Quote / indication PDFs come from Federato or Intact so the masthead matches.",
     tile: { kind: "icon", Icon: PageMark },
-  },
-  {
-    id: "intact",
-    name: "Intact",
-    summary:
-      "Personal car and tenant quotes. Quote PDFs from this path say Intact, never Federato.",
-    tile: { kind: "brand", src: "/brands/intact.png", fit: "contain", bg: "#ffffff" },
   },
   {
     id: "email",

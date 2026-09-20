@@ -94,10 +94,17 @@ const SESSIONS = [
 const TILT = 20 * DEG;
 const AUTO_SPIN = 0.0022;
 
+const POP_EMOJIS = ["🚀", "📈", "👋", "✅", "🔥", "⭐", "💻", "📞", "📱"];
+const POP_LIFETIME_MS = 1400;
+
+type EmojiPop = { id: number; x: number; y: number; emoji: string };
+
 function cssVar(el: HTMLElement, name: string, fallback: string) {
   const v = getComputedStyle(el).getPropertyValue(name).trim();
   return v || fallback;
 }
+
+let popId = 0;
 
 export function WorldMap() {
   const wrap = useRef<HTMLDivElement>(null);
@@ -109,6 +116,9 @@ export function WorldMap() {
     y: number;
   } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [pops, setPops] = useState<EmojiPop[]>([]);
+  // Live projected positions updated each frame
+  const sessionPos = useRef<{ x: number; y: number; depth: number }[]>([]);
 
   // Mutable animation state — deliberately outside React so the frame loop
   // never queues a render.
@@ -126,6 +136,58 @@ export function WorldMap() {
       2600,
     );
     return () => clearInterval(id);
+  }, []);
+
+  // Spawn emoji pops at random land points visible on the globe
+  useEffect(() => {
+    const spawnOne = () => {
+      const s = state.current;
+      const sinY = Math.sin(s.yaw), cosY = Math.cos(s.yaw);
+      const sinT = Math.sin(s.tilt), cosT = Math.cos(s.tilt);
+      const host = wrap.current;
+      if (!host) return;
+      const size = host.clientWidth;
+      const R = size * 0.44, cx = size / 2, cy = size / 2;
+
+      // Pick random visible land points for natural globe coverage
+      const candidates = LAND_POINTS.filter((p) => {
+        const x1 = p.x * cosY + p.z * sinY;
+        const z1 = -p.x * sinY + p.z * cosY;
+        const z2 = p.y * sinT + z1 * cosT;
+        return z2 > 0.2;
+      });
+      if (!candidates.length) return;
+      const p = candidates[Math.floor(Math.random() * candidates.length)];
+      const x1 = p.x * cosY + p.z * sinY;
+      const z1 = -p.x * sinY + p.z * cosY;
+      const y2 = p.y * cosT - z1 * sinT;
+      const z2 = p.y * sinT + z1 * cosT;
+      const sx = cx + R * x1;
+      const sy = cy - R * y2;
+      // Small jitter so stacked pops spread a bit
+      const jx = (Math.random() - 0.5) * 18;
+      const jy = (Math.random() - 0.5) * 18;
+
+      const emoji = POP_EMOJIS[Math.floor(Math.random() * POP_EMOJIS.length)];
+      const newPop: EmojiPop = { id: popId++, x: sx + jx, y: sy + jy, emoji };
+      setPops((cur) => [...cur.slice(-12), newPop]);
+      setTimeout(() => {
+        setPops((cur) => cur.filter((p) => p.id !== newPop.id));
+      }, POP_LIFETIME_MS);
+    };
+
+    // Stagger multiple simultaneous spawners so pops feel continuous
+    const timers: ReturnType<typeof setInterval>[] = [];
+    for (let i = 0; i < 3; i++) {
+      const offset = i * 520;
+      const t = setTimeout(() => {
+        spawnOne();
+        const id = setInterval(spawnOne, 900 + Math.random() * 600);
+        timers.push(id);
+      }, offset);
+      timers.push(t as unknown as ReturnType<typeof setInterval>);
+    }
+    return () => timers.forEach(clearInterval);
   }, []);
 
   useEffect(() => {
@@ -167,7 +229,6 @@ export function WorldMap() {
       const cy = size / 2;
 
       const land = cssVar(cv, "--fg", "#09090b");
-      const brand = cssVar(cv, "--brand", "#ffb224");
 
       ctx.clearRect(0, 0, size, size);
 
@@ -210,29 +271,17 @@ export function WorldMap() {
 
       // session nodes
       const hits: { i: number; sx: number; sy: number }[] = [];
+      const newPos: { x: number; y: number; depth: number }[] = [];
       SESSIONS.forEach((sess, i) => {
         const { sx, sy, depth } = project(sess.v);
+        newPos.push({ x: sx, y: sy, depth });
         if (depth <= 0.04) return;
         hits.push({ i, sx, sy });
 
-        const isHot =
-          s.pointer != null &&
-          Math.hypot(sx - s.pointer.x, sy - s.pointer.y) < 16;
-
-        const pulse = 0.5 + 0.5 * Math.sin(t / 26 + i * 1.7);
-        ctx.globalAlpha = (0.16 + depth * 0.2) * (1 - pulse * 0.55);
-        ctx.fillStyle = brand;
-        ctx.beginPath();
-        ctx.arc(sx, sy, 3 + pulse * 11, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.globalAlpha = Math.min(0.45 + depth * 0.6, 1);
-        ctx.beginPath();
-        ctx.arc(sx, sy, isHot ? 5.4 : 3.1, 0, Math.PI * 2);
-        ctx.fill();
       });
 
       ctx.globalAlpha = 1;
+      sessionPos.current = newPos;
 
       // hover resolution runs on the frame so it follows the spin
       if (s.pointer && !s.drag) {
@@ -345,6 +394,24 @@ export function WorldMap() {
           className="w-full touch-none select-none rounded-full outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--ring)]"
           style={{ cursor: dragging ? "grabbing" : hot ? "pointer" : "grab" }}
         />
+
+        {pops.map((pop) => (
+          <div
+            key={pop.id}
+            className="pointer-events-none absolute z-20 -translate-x-1/2 emoji-pop"
+            style={{ left: pop.x, top: pop.y }}
+            aria-hidden="true"
+          >
+            <div className="flex flex-col items-center gap-0.5">
+              <div className="rounded-[var(--r-sm)] border border-border bg-bg px-2 py-1.5 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.18)]">
+                <span className="block text-[20px] leading-none">{pop.emoji}</span>
+              </div>
+              {/* little tail */}
+              <div className="h-1.5 w-px bg-border" />
+              <div className="h-1 w-1 rounded-full bg-border" />
+            </div>
+          </div>
+        ))}
 
         {hot && hovered && (
           <div

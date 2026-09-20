@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SVGProps } from "react";
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SVGProps, ImgHTMLAttributes } from "react";
 
 export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
@@ -12,31 +12,30 @@ export function cx(...parts: (string | false | null | undefined)[]) {
  */
 export function GooseMark({
   size = 24,
-  eye = "var(--bg)",
-  ...p
-}: SVGProps<SVGSVGElement> & {
+  className,
+}: {
   size?: number;
-  /** The punched-out eye. Override when the mark sits on an inverted tile. */
   eye?: string;
-}) {
+  className?: string;
+} & Omit<ImgHTMLAttributes<HTMLImageElement>, "src" | "alt" | "width" | "height">) {
   return (
-    <svg viewBox="0 0 32 32" width={size} height={size} fill="none" aria-hidden {...p}>
-      {/* neck, sweeping down and left out of the head */}
-      <path
-        d="M12.8 19.5C11.4 23.5 10.8 27.4 10.6 31.2h7.8c.2-4 1-7.8 2.2-11.2Z"
-        fill="currentColor"
-      />
-      <ellipse cx="17" cy="13" rx="9" ry="8.4" fill="currentColor" />
-      <path d="M25.4 10.2 31.6 13.4 25.4 16.6Z" fill="var(--brand)" />
-      <circle cx="20.2" cy="11.2" r="1.5" fill={eye} />
-    </svg>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src="/logo.png"
+      alt=""
+      width={size}
+      height={size}
+      aria-hidden
+      className={cx("inline-block object-contain", className)}
+      style={{ width: size, height: size }}
+    />
   );
 }
 
 export function Wordmark({ className, markSize = 22 }: { className?: string; markSize?: number }) {
   return (
     <span className={cx("inline-flex items-center gap-2", className)}>
-      <GooseMark size={markSize} className="text-fg" />
+      <GooseMark size={markSize} />
       <span className="text-[16px] font-semibold tracking-[-0.03em] text-fg">plus1</span>
     </span>
   );

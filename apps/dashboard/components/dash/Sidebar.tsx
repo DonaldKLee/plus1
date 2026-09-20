@@ -26,9 +26,7 @@ function Brand() {
       href="/"
       className="flex h-[60px] shrink-0 items-center gap-2.5 px-3 transition-opacity hover:opacity-80"
     >
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--r-sm)] bg-inverse-bg">
-        <GooseMark size={19} className="text-inverse-fg" eye="var(--inverse-bg)" />
-      </span>
+      <GooseMark size={28} />
       <span className="text-[15px] font-semibold tracking-[-0.03em] text-fg">plus1</span>
     </Link>
   );

@@ -20,6 +20,7 @@ export function JoinMeeting() {
   const [purpose, setPurpose] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hovered, setHovered] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -115,16 +116,32 @@ export function JoinMeeting() {
             />
           </div>
 
-          <Button
-            type="submit"
-            variant="primary"
-            size="lg"
-            disabled={busy}
-            className="w-full lg:mt-[25px] lg:w-auto"
+          <div
+            className="relative w-full lg:mt-[25px] lg:w-auto"
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
           >
-            {busy ? "Sending…" : "Send the goose"}
-            {!busy && <Arrow width={16} height={16} />}
-          </Button>
+            <div
+              className="pointer-events-none absolute bottom-full right-0 z-50"
+              style={{
+                opacity: hovered ? 1 : 0,
+                transform: hovered ? "translateY(0) scale(1)" : "translateY(8px) scale(0.96)",
+                transition: "opacity 0.18s ease, transform 0.18s cubic-bezier(0.16,1,0.3,1)",
+              }}
+            >
+              <img src="/join-call.png" alt="" width={30} height={20} className="h-auto w-[30px]" />
+            </div>
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              disabled={busy}
+              className="w-full"
+            >
+              {busy ? "Sending…" : "Send the goose"}
+              {!busy && <Arrow width={16} height={16} />}
+            </Button>
+          </div>
         </div>
 
         {error ? (

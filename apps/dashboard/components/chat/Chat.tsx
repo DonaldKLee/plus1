@@ -22,11 +22,12 @@ function plus1Name(): string {
   return readConfig().name?.trim() || "plus1";
 }
 
-type Tools = { federato: boolean; docs: boolean; email: boolean; files: "off" | "read" | "write" };
+type Tools = { federato: boolean; intact: boolean; docs: boolean; email: boolean; files: "off" | "read" | "write" };
 function readTools(): Tools {
   const c = readConfig();
   return {
     federato: c.servers?.federato !== false,
+    intact: c.servers?.intact !== false,
     docs: c.servers?.docs === true,
     email: c.servers?.email === true,
     files: !c.servers?.local ? "off" : c.localAccess === "write" ? "write" : "read",
@@ -46,7 +47,7 @@ const INTRO_SPEED_MS = 18; // ms per character
 
 export function Chat() {
   const [name] = useState(plus1Name);
-  const [tools, setTools] = useState<Tools>({ federato: true, docs: false, email: false, files: "off" });
+  const [tools, setTools] = useState<Tools>({ federato: true, intact: true, docs: false, email: false, files: "off" });
   const [chatId, setChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [introText, setIntroText] = useState("");
@@ -134,6 +135,7 @@ export function Chat() {
               <h1 className="text-[26px] font-semibold tracking-[-0.04em] text-fg">{name}</h1>
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {tools.federato && <Chip color="var(--act)">federato</Chip>}
+                {tools.intact && <Chip color="var(--alert)">intact</Chip>}
                 {tools.docs && <Chip color="var(--think)">pdf</Chip>}
                 {tools.email && <Chip color="var(--live)">email</Chip>}
                 <Link href="/app/plus1" title="configure in the plus1 tab">

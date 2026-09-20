@@ -31,7 +31,7 @@ import { createChat, getChat, sendChatMessage, updateChatConfig } from "./chat.j
 import { getQuotePdf } from "./intactPdf.js";
 import { loadDoc } from "./docPdf.js";
 import { docFontStatus } from "./docTemplate.js";
-import { emailStatus, verifyEmail } from "./email.js";
+import { emailStatus, verifyEmail, emailPolicyFromConfig } from "./email.js";
 import { startPublicDocs } from "./publicDocs.js";
 import {
   deleteMeeting,
@@ -337,6 +337,7 @@ app.put("/api/plus1/config", async (req, res) => {
   }
   try {
     const saved = await saveplus1Settings(config as Record<string, unknown>);
+    emailPolicyFromConfig(config as Record<string, unknown>);
     // No database configured is not an error: the tab keeps its local copy.
     res.json({ ok: true, saved, store: storeEnabled() ? "mongodb" : "memory" });
   } catch (e) {
@@ -510,6 +511,9 @@ app.post("/api/meet/sessions/:id/leave", async (req, res) => {
 const port = Number(process.env.PORT ?? 8787);
 app.listen(port, () => {
   console.log(`backend listening on http://localhost:${port}`);
+  void getplus1Settings()
+    .then((cfg) => emailPolicyFromConfig(cfg))
+    .catch(() => undefined);
   // Say it at boot, not at render time: generated PDFs silently fall back to the
   // PDF core fonts when Geist is missing, and that is an operator's problem to
   // know about rather than a reader's to discover.

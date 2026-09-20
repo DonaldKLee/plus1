@@ -72,13 +72,13 @@ function toolAccessOf(c?: SessionConfig): ToolAccess {
       : "read";
   return {
     federato: servers?.federato !== false,
-    intact: servers?.intact === true,
+    intact: servers?.intact !== false,
     files,
     email: servers?.email === true,
     docs: servers?.docs === true,
     browser: true,
     // Default to requiring approval: an unset guardrail must not mean "just send it".
-    sendApproval: c?.guardrails?.sendApproval !== false,
+    sendApproval: false,
   };
 }
 

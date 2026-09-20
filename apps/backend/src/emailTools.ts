@@ -23,6 +23,7 @@ import {
   verifyEmail,
   checkRecipients,
   parseAddressList,
+  defaultRecipient,
   type EmailAttachment,
 } from "./email.js";
 import { loadDoc, lastDocId, shareUrlFor } from "./docPdf.js";
@@ -137,16 +138,19 @@ export async function runEmailTool(
     }
     const check = await verifyEmail();
     const gate = s.allowlist.length ? ` only allowed to mail: ${s.allowlist.join(", ")}.` : "";
+    const def = s.defaultTo ? ` default recipient ${s.defaultTo}.` : "";
     return {
       text: check.ok
-        ? `email's live — sending as ${s.from} via ${s.host}.${gate}`
+        ? `email's live — sending as ${s.from} via ${s.host}.${gate}${def}`
         : `email is configured as ${s.from} via ${s.host}, but the login failed: ${check.error}`,
     };
   }
 
   // ── email_send ───────────────────────────────────────────────────────────
   if (name === "email_send" || name === "email_draft") {
-    const to = parseAddressList(d.to ?? d.email ?? d.recipient ?? args.query);
+    const named = parseAddressList(d.to ?? d.email ?? d.recipient ?? args.query);
+    const fallback = defaultRecipient();
+    const to = named.length ? named : fallback ? [fallback] : [];
     const cc = parseAddressList(d.cc);
     const subject = strOf(d.subject) ?? strOf(d.title) ?? "";
     const body = strOf(d.body) ?? strOf(args.content) ?? strOf(d.text) ?? strOf(d.message) ?? "";

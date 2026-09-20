@@ -111,6 +111,7 @@ export function readplus1Config(): Record<string, unknown> | undefined {
       guardrails: c.guardrails,
       servers: c.servers,
       localAccess: c.localAccess,
+      email: c.email,
     };
   } catch {
     return undefined;
@@ -264,6 +265,30 @@ export async function fetchplus1Config(): Promise<Record<string, unknown> | null
     if (!res.ok) return null;
     const json = await res.json();
     return (json.config ?? null) as Record<string, unknown> | null;
+  } catch {
+    return null;
+  }
+}
+
+export interface EmailStatus {
+  configured: boolean;
+  dryRun: boolean;
+  from?: string;
+  host?: string;
+  port?: number;
+  user?: string;
+  allowlist: string[];
+  maxRecipients: number;
+  defaultTo?: string;
+  verified?: boolean;
+  error?: string;
+}
+
+export async function fetchEmailStatus(verify = false): Promise<EmailStatus | null> {
+  try {
+    const res = await fetch(`${AGENT_URL}/api/email/status${verify ? "?verify=1" : ""}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    return (await res.json()) as EmailStatus;
   } catch {
     return null;
   }

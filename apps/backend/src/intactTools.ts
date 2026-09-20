@@ -128,7 +128,8 @@ export interface NextStep {
 export interface IntactToolResult {
   text: string;
   quote?: QuoteResult;
-  pdfUrl?: string; // relative path served by the backend
+  pdfUrl?: string;
+  shareUrl?: string;
   nextStep?: NextStep;
 }
 
@@ -156,16 +157,17 @@ export async function runIntactTool(
     return { text: `that's a ${describeVehicle(v)}. i'll use that for the quote.` };
   }
 
-  if (name === "intact_email_quote") {
+  if (name === "intact_quote_pdf" || name === "intact_email_quote") {
     const product = enumOf(d.product, ["car", "tenant"] as const) ?? (d.contentsValue != null ? "tenant" : "car");
     const q = product === "tenant" ? quoteTenant(coerceTenant(d)) : quoteCar(coerceCar(d));
-    const id = await renderQuotePdf(q, applicantOf(d));
-    const pdfUrl = `/api/intact/quote/${id}.pdf`;
+    const pdf = await renderQuotePdf(q, applicantOf(d));
     const email = strOf(d.email);
-    const text = email
-      ? `your ${product} quote summary is ready as a PDF — download it below. (once your Gmail's connected i can send it straight to ${email}.)`
-      : `your ${product} quote summary is ready as a PDF — download it below.`;
-    return { text, quote: q, pdfUrl };
+    const text = pdf.shareUrl
+      ? `Intact ${product} quote is ready. The PDF is in the chat — don't read the URL.`
+      : email
+        ? `your Intact ${product} quote is ready as a PDF. I can email it to ${email}.`
+        : `your Intact ${product} quote is ready as a PDF.`;
+    return { text, quote: q, pdfUrl: pdf.pdfUrl, shareUrl: pdf.shareUrl };
   }
 
   if (name === "intact_next_step") {

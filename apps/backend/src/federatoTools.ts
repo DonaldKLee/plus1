@@ -18,11 +18,15 @@ import { deepDivePolicy } from "./deepDive.js";
 import { enrichLocation } from "./enrichment.js";
 import { agenticQuery, traceLines } from "./federatoQuery.js";
 import { rankQueue } from "./rank.js";
+import { renderFederatoIndication } from "./federatoPdf.js";
+import { stashPdfBytes } from "./docPdf.js";
 
 export interface FederatoToolResult {
   text: string;
   /** Operator-facing reasoning trace: queries chosen, sources consulted. */
   trace?: string[];
+  pdfUrl?: string;
+  shareUrl?: string;
 }
 
 const money = (n: number | null | undefined) =>
@@ -232,6 +236,38 @@ function guidelines(topic?: string): FederatoToolResult {
   return { text: explainGuidelines(topic) };
 }
 
+// ───────────────────────────── federato_quote_pdf ──────────────────────────
+
+async function quotePdf(query?: string): Promise<FederatoToolResult> {
+  const q = query?.trim();
+  if (!q) return { text: "which account should the indication be for? name or policy number." };
+  const found = await findPolicyId(q);
+  if (found.id == null) {
+    return { text: `couldn't find "${q}" in the queue.`, trace: [found.how] };
+  }
+  const { deepDive, hops } = await deepDivePolicy(found.id, { enrich: true });
+  const { ranked, policies } = await rankQueue({ refresh: false, withPolicies: true });
+  const row = ranked.find((r) => r.policyId === found.id);
+  const broker = brokerOf(found.id, policies);
+  const pdf = await renderFederatoIndication({ deepDive, row, broker });
+  const stored = await stashPdfBytes({
+    bytes: pdf.bytes,
+    filename: pdf.filename,
+    title: pdf.title,
+    pages: pdf.pages,
+  });
+  const who = deepDive.accountName;
+  const text = stored.shareUrl
+    ? `Indication for ${who}: ${deepDive.decision.toUpperCase()}, score ${deepDive.factors.reduce((n, f) => n + f.points, 0)}/${deepDive.factors.length * 2}. The PDF is in the chat — don't read the URL.`
+    : `Indication for ${who} is ready as a PDF (${deepDive.decision.toUpperCase()}). I can email it if you give me an address.`;
+  return {
+    text,
+    pdfUrl: stored.pdfUrl,
+    shareUrl: stored.shareUrl,
+    trace: [found.how, ...hops.map((h) => `${h.stage} ${h.detail ?? ""}`), stored.shareUrl ? "uploaded to Appwrite" : "no public host"],
+  };
+}
+
 /** Dispatch a federato_* tool. */
 export async function runFederatoTool(name: string, args: { query?: string }): Promise<FederatoToolResult> {
   switch (name) {
@@ -248,6 +284,8 @@ export async function runFederatoTool(name: string, args: { query?: string }): P
       return enrich(args.query);
     case "federato_guidelines":
       return guidelines(args.query);
+    case "federato_quote_pdf":
+      return quotePdf(args.query);
     default:
       return { text: `Unknown Federato tool: ${name}` };
   }
@@ -261,4 +299,5 @@ export const FEDERATO_TOOL_DOCS: { name: string; doc: string }[] = [
   { name: "federato_portfolio", doc: `federato_portfolio(dimension) — where the book is already exposed, for portfolio context: by "state", "hazard", "construction", "broker", "decision" or "business type" — policies, TIV, premium and share of the book per bucket. Use for "are we already heavy in Florida / flood / frame", "which broker sends us the most".` },
   { name: "federato_enrich", doc: `federato_enrich(query) — pull OUTSIDE risk data for one account's primary location: FEMA disaster declarations for the county since 2015, NFIP flood claims in the zip, and last year's worst gust and wettest day (OpenFEMA + Open-Meteo, live), scored as extra appetite factors, and whether that changes the decision. Use when someone asks about flood/hurricane/cat exposure or "what does the outside data say".` },
   { name: "federato_guidelines", doc: `federato_guidelines(topic?) — quote the 2025 commercial property appetite table (or one factor, e.g. "premium", "construction") or define an underwriting term ("TIV", "appetite", "refer"). Use when someone asks what the rules are or what a term means.` },
+  { name: "federato_quote_pdf", doc: `federato_quote_pdf(query) — render a one-page commercial property INDICATION from the live Federato file. The masthead says Federato, never Intact. Use when the room is on a commercial account (Harbor Point, a policy number, the UW queue) and they want a quote PDF / indication / write-up. tool.query is the account name or policy number. NEVER use this for a personal Intact car/tenant quote. The public Appwrite link is posted into Meet chat automatically — NEVER read the URL aloud.` },
 ];

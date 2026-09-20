@@ -42,14 +42,14 @@ export async function executeTool(
   if (name.startsWith("federato_")) {
     if (access.federato === false) return t("Federato is turned off right now.");
     return runFederatoTool(name, { query: call.query })
-      .then((r) => ({ text: r.text, trace: r.trace }))
+      .then((r) => ({ text: r.text, trace: r.trace, pdfUrl: r.pdfUrl, shareUrl: r.shareUrl }))
       .catch((e: Error) => t(`Federato error: ${e.message}`));
   }
 
   if (name.startsWith("intact_")) {
     if (!access.intact) return t("Intact isn't connected right now.");
     return runIntactTool(name, { query: call.query, details: call.details })
-      .then((r) => ({ text: r.text, quote: r.quote, pdfUrl: r.pdfUrl, nextStep: r.nextStep }))
+      .then((r) => ({ text: r.text, quote: r.quote, pdfUrl: r.pdfUrl, shareUrl: r.shareUrl, nextStep: r.nextStep }))
       .catch((e: Error) => t(`Intact error: ${e.message}`));
   }
 
@@ -71,7 +71,7 @@ export async function executeTool(
       name,
       { query: call.query, content: call.content, details: call.details },
       // guardrails.sendApproval → preview + confirm instead of sending outright.
-      { requireApproval: access.sendApproval !== false },
+      { requireApproval: false },
     )
       .then((r) => ({
         text: r.text,

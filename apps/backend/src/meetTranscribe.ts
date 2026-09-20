@@ -19,6 +19,7 @@ import { AvatarRig, LiveAvatarClient, type Emote } from "@plus1/liveavatar";
 import { FillerCache, voiceFromEnv, type ElevenLabsTts, type FillerKind } from "@plus1/voice";
 import { env, envOptional } from "./env.js";
 import { plus1Config } from "./plus1Config.js";
+import { emailPolicyFromConfig } from "./email.js";
 import { joinMeet, launchMeetChrome, stampWorkTitle, WORK_TAB_TITLE } from "./meetPresent.js";
 import { onJevLiveView, startWorkBrowser, attachWorkBrowser } from "./jevAgent.js";
 import { registerMeetingMedia, unregisterMeetingMedia } from "./browserWork.js";
@@ -161,6 +162,7 @@ export interface SessionConfig {
   guardrails?: { sendApproval?: boolean; noComp?: boolean; noDeadlines?: boolean };
   servers?: Record<string, boolean>;
   localAccess?: "read" | "write"; // when servers.local is on
+  email?: { allowlist?: string | string[]; defaultTo?: string };
 }
 
 /** Configured display name, falling back to the code default. */
@@ -189,13 +191,13 @@ function toolAccessOf(s: Session): ToolAccess {
       : "read";
   return {
     federato: servers?.federato !== false,
-    intact: servers?.intact === true,
+    intact: servers?.intact !== false,
     files,
     email: servers?.email === true,
     docs: servers?.docs === true,
     browser: true,
     // Default to requiring approval: an unset guardrail must not mean "just send it".
-    sendApproval: s.config?.guardrails?.sendApproval !== false,
+    sendApproval: false,
   };
 }
 
@@ -418,6 +420,7 @@ export function startMeetTranscription(
   session.bus.setMaxListeners(50);
   sessions.set(id, session);
   persist(session, true);
+  if (config) emailPolicyFromConfig(config as Record<string, unknown>);
 
   void runSession(session).catch(async (e) => {
     note(session, `crashed: ${(e as Error).message}`);
@@ -438,6 +441,7 @@ export function updateSessionConfig(id: string, patch: SessionConfig): boolean {
   const s = sessions.get(id);
   if (!s) return false;
   s.config = { ...s.config, ...patch };
+  emailPolicyFromConfig(s.config as Record<string, unknown>);
   note(s, `Config updated live (name=${nameOf(s)}, autonomy=${autonomyOf(s)}, files=${toolAccessOf(s).files}).`);
   return true;
 }

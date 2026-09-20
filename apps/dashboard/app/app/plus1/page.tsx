@@ -9,7 +9,7 @@ export default function Plus1Page() {
     <>
       <PageHeader
         title="plus1"
-        description="Configure the plus1 that joins your meetings — its name and voice, how far it acts on its own, when it asks instead of guessing, and which tools it can reach."
+        description="Name, voice, how far it acts on its own, which tools it can reach, and who it is allowed to email."
       />
       <PageBody>
         <div className="flex flex-col gap-5">

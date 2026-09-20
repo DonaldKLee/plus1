@@ -58,10 +58,44 @@ export interface EmailStatus {
   user?: string;
   allowlist: string[];
   maxRecipients: number;
+  defaultTo?: string;
 }
 
 /** Hard ceiling on recipients per message — a mis-parse shouldn't become a blast. */
 const MAX_RECIPIENTS = Number(envOptional("EMAIL_MAX_RECIPIENTS") ?? 5);
+
+/** Extra gates from the plus1 tab (Mongo), merged with EMAIL_ALLOWLIST in .env. */
+let extraAllowlist: string[] = [];
+let extraDefaultTo: string | undefined;
+
+function parseAllowEntries(raw: unknown): string[] {
+  const parts = Array.isArray(raw)
+    ? raw.filter((x): x is string => typeof x === "string")
+    : typeof raw === "string"
+      ? raw.split(/[,;\s]+/)
+      : [];
+  return parts.map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
+/** Apply allowlist / default recipient from the saved plus1 config. */
+export function applyEmailPolicy(p: { allowlist?: string[]; defaultTo?: string }): void {
+  extraAllowlist = parseAllowEntries(p.allowlist);
+  extraDefaultTo = p.defaultTo?.trim() || undefined;
+}
+
+/** Read `config.email` from a plus1 settings object and apply it. */
+export function emailPolicyFromConfig(config: Record<string, unknown> | null | undefined): void {
+  const raw = config && typeof config.email === "object" && config.email ? (config.email as Record<string, unknown>) : {};
+  applyEmailPolicy({
+    allowlist: parseAllowEntries(raw.allowlist),
+    defaultTo: typeof raw.defaultTo === "string" ? raw.defaultTo : undefined,
+  });
+}
+
+/** Optional default recipient from the plus1 tab, used when the room doesn't name one. */
+export function defaultRecipient(): string | undefined {
+  return extraDefaultTo;
+}
 
 // ── configuration ──────────────────────────────────────────────────────────
 interface SmtpConf {
@@ -126,6 +160,7 @@ export function emailStatus(): EmailStatus {
     user: c?.user,
     allowlist: allowlist(),
     maxRecipients: MAX_RECIPIENTS,
+    defaultTo: extraDefaultTo,
   };
 }
 
@@ -140,10 +175,11 @@ export function isValidEmail(s: string): boolean {
 
 /** Comma-separated addresses and/or bare domains. Empty = allow anything. */
 function allowlist(): string[] {
-  return (envOptional("EMAIL_ALLOWLIST") ?? "")
+  const fromEnv = (envOptional("EMAIL_ALLOWLIST") ?? "")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
+  return [...new Set([...fromEnv, ...extraAllowlist])];
 }
 
 function allowed(addr: string): boolean {

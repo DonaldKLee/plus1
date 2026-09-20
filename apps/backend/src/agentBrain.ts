@@ -167,8 +167,12 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
       doc: `intact_explain(query) — explain one insurance term/coverage (deductible, third-party liability, accident benefits, collision, comprehensive, accident forgiveness, water backup, bundle…) in a plain, friendly sentence.`,
     });
     tools.push({
+      name: "intact_quote_pdf",
+      doc: `intact_quote_pdf — render a one-page Intact PERSONAL quote PDF (car or tenant). The masthead says Intact, never Federato. Use when the room has been quoting personal auto/tenant and they want "a quote pdf", "put that on paper", or "send me the quote". tool.details: the same quote fields plus product[car|tenant], name, email. The public Appwrite link is posted into Meet chat automatically — NEVER read the URL aloud. Do NOT use this for a commercial-property / Federato account.`,
+    });
+    tools.push({
       name: "intact_email_quote",
-      doc: `intact_email_quote — produce a PDF quote summary the customer can download (and, once Gmail is connected, email). Call it after they've seen a quote and want it sent/saved. tool.details: the same quote fields plus product[car|tenant], name, email.`,
+      doc: `intact_email_quote — same as intact_quote_pdf (legacy name). Prefer intact_quote_pdf.`,
     });
     tools.push({
       name: "intact_next_step",
@@ -197,11 +201,7 @@ NEVER read the resulting link out loud, character by character or otherwise — 
   if (access.email) {
     tools.push({
       name: "email_send",
-      doc: `email_send — actually email someone. tool.details: to (address; comma-separate a few), cc (optional), subject, body (the full message you wrote), attachPdf (optional — set it to "last" to attach the PDF you just made). ${
-        access.sendApproval
-          ? `IMPORTANT: sending needs approval, so this happens in TWO steps. Your first call returns the exact draft and does NOT send. Read the gist out loud and ask if they want it sent. When a human says yes, call email_send AGAIN with the same details plus details.confirm = true — that one sends. Never claim you sent something after only the first call.`
-          : `It sends immediately, so make sure you have the right address and a body worth sending.`
-      }`,
+      doc: `email_send — actually email someone. tool.details: to (address; comma-separate a few), cc (optional), subject, body (the full message you wrote), attachPdf (optional — set it to "last" to attach the PDF you just made). It sends immediately, so make sure you have the right address and a body worth sending.`,
     });
     tools.push({
       name: "email_status",
@@ -262,6 +262,14 @@ ${opts.tools.map((t) => `  - ${t.doc}`).join("\n")}`
       ? `\nWHAT TO REMEMBER — standing context and instructions. Honor EVERY item on EVERY turn, even after it has scrolled out of the transcript below:
 ${opts.memory.map((m) => `  - ${m}`).join("\n")}\n`
       : "";
+  const intactNote = opts.tools.some((t) => t.name.startsWith("intact_"))
+    ? `
+PERSONAL LINES (Intact, the Canadian insurer): car and tenant quotes live here, not in Federato.
+- "quote my car" / "how much for a 2020 corolla" → intact_quote_car in the same turn.
+- "send me the quote pdf" / "put that quote on paper" after an Intact quote → intact_quote_pdf with the same details, say="putting the intact quote together now".
+- Never stamp a personal-lines PDF as Federato, and never use federato_quote_pdf for a car or tenant quote.
+`
+    : "";
   const underwriterNote = opts.tools.some((t) => t.name.startsWith("federato_"))
     ? `
 YOU THINK LIKE AN UNDERWRITING PROFESSIONAL. When the room talks about a submission, account, broker, state, hazard, premium, TIV, losses or appetite, that's your lane:
@@ -278,6 +286,7 @@ WORKED EXAMPLES (what someone says → what you do, in the same turn):
 - "how exposed are we already to flood / to that broker / in california?" → federato_portfolio, tool.query="hazard" / "broker" / "state".
 - "how many active property policies do we have in california over fifty million?" / "which brokers send us the most declines?" / "claims over a hundred k by cause?" → federato_query with the question as tool.query, say="let me run that against the book".
 - "what's the premium rule again?" / "what does TIV mean?" → federato_guidelines, tool.query="premium" / "TIV".
+- "send a quote pdf" / "write up the indication" / "can you put harbor point on paper?" → if this is a commercial Federato account, federato_quote_pdf with tool.query=the account, say="putting the indication together now". If this is a personal Intact car/tenant quote, intact_quote_pdf with the quote details instead — never mix the two brands.
 - After a tool: lead with the decision or the number, then the ONE factor that drives it, then the next step ("cross continental's a decline: premium's a hundred eighty-eight over the one seventy-five cap and the buildings are seventy-eight. want the next one?").
 `
     : "";
@@ -322,7 +331,7 @@ GUARDRAILS:
 - Never stall silently. If you're working on something, say so.
 - Deflect off-topic noise. If the room drifts onto something you're not here to advise on, give it a beat and steer back to the active task.
 - Be aware other people are in the room. Only speak when you're addressed or when your specific expertise or action is clearly what's needed. When humans are working something out between themselves, stay out of it (action="none").
-${memorySection}${underwriterNote}${browserNote}${mutedNote}${renderState(opts.state)}
+${memorySection}${intactNote}${underwriterNote}${browserNote}${mutedNote}${renderState(opts.state)}
 Act when it is useful and welcome:
 - Someone addresses you ("${name}" or "plus one").
 - Someone asks an open question you or a tool can helpfully answer.

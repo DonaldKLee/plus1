@@ -2,12 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Panel, PanelHead, Input, Plus1Mark, Chip, Dot, Button, cx } from "@/components/ui";
-import { Shield, Plug, PageMark, Check, Plus } from "@/components/icons";
+import { Plug, Check, Plus } from "@/components/icons";
 import {
   activeSessionId,
+  fetchEmailStatus,
   fetchplus1Config,
   saveplus1Config,
   updateSessionConfig,
+  type EmailStatus,
 } from "@/lib/session";
 
 /* --------------------------------------------------------------- model ---- */
@@ -25,6 +27,7 @@ interface Config {
   guardrails: { sendApproval: boolean; noComp: boolean; noDeadlines: boolean };
   servers: Record<ServerId, boolean>;
   localAccess: AccessLevel;
+  email: { allowlist: string; defaultTo: string };
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -34,11 +37,11 @@ const DEFAULT_CONFIG: Config = {
   confidence: 68,
   honk: true,
   monologueMin: 3,
-  guardrails: { sendApproval: true, noComp: true, noDeadlines: false },
-  // Documents are harmless (a PDF in memory); email leaves the building, so it
-  // starts off and stays behind the sendApproval guardrail.
-  servers: { federato: true, intact: false, local: false, docs: true, email: true },
+  guardrails: { sendApproval: false, noComp: true, noDeadlines: false },
+  // Documents are harmless (a PDF in memory); email leaves the building.
+  servers: { federato: true, intact: true, local: false, docs: true, email: true },
   localAccess: "read",
+  email: { allowlist: "", defaultTo: "" },
 };
 
 const STORAGE_KEY = "plus1.plus1.config";
@@ -51,6 +54,10 @@ function normalize(p: Partial<Config>): Config {
     guardrails: { ...DEFAULT_CONFIG.guardrails, ...(p.guardrails ?? {}) },
     servers: { ...DEFAULT_CONFIG.servers, ...(p.servers ?? {}) },
     localAccess: p.localAccess === "write" ? "write" : "read",
+    email: {
+      ...DEFAULT_CONFIG.email,
+      ...(typeof p.email === "object" && p.email ? p.email : {}),
+    },
   };
 }
 
@@ -78,9 +85,16 @@ const SERVERS: { id: ServerId; name: string; monogram: string; summary: string }
     id: "federato",
     name: "Federato",
     monogram: "F",
-    summary: "Underwriting appetite and submissions — schema discovery, query planning, per-policy scoring.",
+    summary:
+      "Commercial property queue, appetite scoring, and Federato-branded indication PDFs from the live file.",
   },
-  { id: "intact", name: "Intact", monogram: "I", summary: "Conversational car + tenant insurance quoting — Bob gathers what's needed and returns an estimate with coverage recommendations." },
+  {
+    id: "intact",
+    name: "Intact",
+    monogram: "I",
+    summary:
+      "Personal car and tenant quotes. Quote PDFs from this path say Intact, never Federato.",
+  },
   {
     id: "local",
     name: "Local access",
@@ -92,19 +106,18 @@ const SERVERS: { id: ServerId; name: string; monogram: string; summary: string }
     name: "Documents",
     monogram: "D",
     summary:
-      "Write meeting notes into a PDF, upload it to Appwrite, and drop the public link in Meet chat.",
+      "Meeting notes and write-ups as PDFs. Quote PDFs still come from Federato or Intact so the masthead matches the source.",
   },
   {
     id: "email",
     name: "Email",
     monogram: "E",
     summary:
-      "Send email over SMTP, with a generated PDF attached. Needs GMAIL_USER + GMAIL_APP_PASSWORD (or the SMTP_* vars) in .env — without them the plus1 drafts but nothing goes out.",
+      "Send mail with the last PDF attached. SMTP credentials stay in .env; allowlist and a default recipient live here.",
   },
 ];
 
 const GUARDRAILS: { id: keyof Config["guardrails"]; label: string }[] = [
-  { id: "sendApproval", label: "Ask before sending, publishing, or deleting" },
   { id: "noComp", label: "Never discuss compensation or salary" },
   { id: "noDeadlines", label: "Never commit to deadlines on my behalf" },
 ];
@@ -247,6 +260,153 @@ function Stepper({ value, min, max, onChange, unit }: { value: number; min: numb
   );
 }
 
+function parseEntries(raw: string): string[] {
+  return raw
+    .split(/[,;\s]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function AllowlistEditor({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const entries = parseEntries(value);
+
+  const add = (raw: string) => {
+    const next = parseEntries(raw);
+    if (!next.length) return;
+    onChange([...new Set([...entries, ...next])].join(", "));
+    setDraft("");
+  };
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1.5">
+        {entries.map((e) => (
+          <button
+            key={e}
+            type="button"
+            onClick={() => onChange(entries.filter((x) => x !== e).join(", "))}
+            className="chip text-fg hover:border-border-strong"
+            title={`Remove ${e}`}
+          >
+            <span className="tnum">{e}</span>
+            <span className="text-fg-subtle">×</span>
+          </button>
+        ))}
+      </div>
+      <Input
+        className="mt-2"
+        value={draft}
+        spellCheck={false}
+        autoComplete="off"
+        placeholder="Add an address or domain — enter"
+        aria-label="Add allowlist entry"
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === "," || e.key === " ") {
+            e.preventDefault();
+            add(draft);
+          }
+          if (e.key === "Backspace" && !draft && entries.length) {
+            onChange(entries.slice(0, -1).join(", "));
+          }
+        }}
+        onBlur={() => {
+          if (draft.trim()) add(draft);
+        }}
+      />
+    </div>
+  );
+}
+
+function EmailSettings({
+  config,
+  onChange,
+}: {
+  config: Config;
+  onChange: (email: Config["email"]) => void;
+}) {
+  const [status, setStatus] = useState<EmailStatus | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void fetchEmailStatus(false).then((s) => {
+      if (alive) setStatus(s);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function verify() {
+    setChecking(true);
+    const s = await fetchEmailStatus(true);
+    setStatus(s);
+    setChecking(false);
+  }
+
+  const sending = Boolean(status?.configured && !status.dryRun);
+  const label = !status
+    ? "Checking SMTP…"
+    : sending
+      ? `Sending as ${status.from ?? status.user} via ${status.host}`
+      : status.configured
+        ? `Configured as ${status.from ?? status.user}, currently drafting only`
+        : "SMTP is not configured — drafts stay on this machine";
+
+  return (
+    <div className="rise-in mt-4 flex flex-col gap-4 border-t border-border pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Chip color={sending ? "var(--live)" : "var(--think)"}>
+            <Dot color={sending ? "var(--live)" : "var(--think)"} pulse={sending} />
+            {sending ? "Live" : status?.configured ? "Draft only" : "Not connected"}
+          </Chip>
+          <span className="min-w-0 text-[12.5px] leading-relaxed text-fg-muted">{label}</span>
+        </div>
+        <Button size="sm" variant="ghost" onClick={() => void verify()} disabled={checking}>
+          {checking ? "Checking…" : status?.verified === true ? "Verified" : "Check connection"}
+        </Button>
+      </div>
+      {status?.error && <p className="text-[12.5px] leading-relaxed text-[var(--alert)]">{status.error}</p>}
+
+      <label className="block">
+        <span className="mb-1.5 block text-[13px] font-medium text-fg">Default recipient</span>
+        <Input
+          type="email"
+          value={config.email.defaultTo}
+          spellCheck={false}
+          autoComplete="email"
+          placeholder="you@company.com"
+          onChange={(e) => onChange({ ...config.email, defaultTo: e.target.value })}
+        />
+        <p className="mt-2 text-[12.5px] leading-relaxed text-fg-muted">
+          Used when someone says “email it” without naming an address.
+        </p>
+      </label>
+
+      <div>
+        <span className="mb-1.5 block text-[13px] font-medium text-fg">Allowlist</span>
+        <AllowlistEditor
+          value={config.email.allowlist}
+          onChange={(allowlist) => onChange({ ...config.email, allowlist })}
+        />
+        <p className="mt-2 text-[12.5px] leading-relaxed text-fg-muted">
+          Addresses or domains the plus1 may mail. Combined with EMAIL_ALLOWLIST in .env. Empty here
+          means only that list — or anyone, if both are empty.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function Segmented({ value, onChange }: { value: AccessLevel; onChange: (n: AccessLevel) => void }) {
   const opts: { id: AccessLevel; label: string }[] = [
     { id: "read", label: "Read only" },
@@ -361,6 +521,7 @@ export function Plus1Config() {
           guardrails: config.guardrails,
           servers: config.servers,
           localAccess: config.localAccess,
+          email: config.email,
         }).then((ok) => {
           if (!ok) return;
           setLive(true);
@@ -582,6 +743,12 @@ export function Plus1Config() {
                             : "The plus1 can read files but not change them."}
                         </span>
                       </div>
+                    )}
+                    {s.id === "email" && on && (
+                      <EmailSettings
+                        config={config}
+                        onChange={(email) => setConfig((c) => ({ ...c, email }))}
+                      />
                     )}
                   </div>
                   <Toggle

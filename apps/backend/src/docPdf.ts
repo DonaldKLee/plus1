@@ -207,44 +207,63 @@ export async function renderDocPdf(spec: DocSpec): Promise<RenderedDoc> {
   });
 
   const bytes = await doc.save();
-  const id = randomUUID();
-  // The share token is a bearer credential — anyone holding the link can read
-  // the document — so it gets real entropy rather than reusing the render id.
-  // 24 random bytes ≈ 192 bits, base64url so it's safe to paste anywhere.
-  const token = randomBytes(24).toString("base64url");
   const filename = `${slugify(spec.filename ?? title)}.pdf`;
+  return stashPdfBytes({
+    bytes,
+    filename,
+    title,
+    pages,
+    meetingId: spec.meetingId,
+  });
+}
 
-  // Appwrite first — a real https URL people in Meet can click. Tunnel/Mongo
-  // stay as fallback when Appwrite isn't set up.
+/** Store already-rendered PDF bytes (Federato indications, etc.) and publish. */
+export async function stashPdfBytes(opts: {
+  bytes: Uint8Array;
+  filename: string;
+  title: string;
+  pages: number;
+  meetingId?: string;
+}): Promise<RenderedDoc> {
+  gc();
+  const id = randomUUID();
+  const token = randomBytes(24).toString("base64url");
+  const filename = opts.filename.endsWith(".pdf") ? opts.filename : `${opts.filename}.pdf`;
+
   let shareUrl: string | undefined;
   try {
-    shareUrl = await uploadPublicPdf(bytes, filename);
+    shareUrl = await uploadPublicPdf(opts.bytes, filename);
   } catch (e) {
     console.warn(`[doc] appwrite upload failed: ${(e as Error).message}`);
   }
   if (!shareUrl) shareUrl = shareUrlFor(token);
 
-  store.set(id, { bytes, filename, title, token, shareUrl, at: Date.now() });
+  store.set(id, {
+    bytes: opts.bytes,
+    filename,
+    title: opts.title,
+    token,
+    shareUrl,
+    at: Date.now(),
+  });
   tokens.set(token, id);
 
-  // Mirror to Atlas so the link outlives this process. Awaited (it's a few KB)
-  // but never allowed to fail the render — same posture as store.ts.
   await saveDocument({
     token,
     docId: id,
     filename,
-    title,
-    bytes,
-    pages,
-    meetingId: spec.meetingId,
+    title: opts.title,
+    bytes: opts.bytes,
+    pages: opts.pages,
+    meetingId: opts.meetingId,
   }).catch(() => false);
 
   return {
     id,
     token,
     filename,
-    pages,
-    bytes: bytes.length,
+    pages: opts.pages,
+    bytes: opts.bytes.length,
     pdfUrl: `/api/doc/${id}.pdf`,
     shareUrl,
   };

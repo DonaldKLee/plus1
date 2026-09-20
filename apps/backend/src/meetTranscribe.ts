@@ -132,6 +132,7 @@ interface Session {
   live?: LiveSocket; // Gemini Live WebSocket
   liveReady?: boolean;
   currentLineId?: string; // the line currently being built from the stream
+  currentSpeaker?: string; // best-effort active speaker name, read from the Meet DOM
   gapTimer?: ReturnType<typeof setTimeout>;
   // Brain / auto-act state.
   page?: Page; // the Meet tab, for chat + speak actions
@@ -700,6 +701,8 @@ function appendFragment(s: Session, frag: string): void {
       at: new Date().toISOString(),
       text: "",
       partial: true,
+      // Whoever the Meet DOM last flagged as speaking gets this line.
+      speaker: s.currentSpeaker,
     };
     s.currentLineId = line.id;
     s.lines.push(line);
@@ -817,7 +820,7 @@ function transcriptWindow(s: Session, maxLines = 14): string {
   return s.lines
     .filter((l) => !l.partial)
     .slice(-maxLines)
-    .map((l) => `[${l.agent ? me : "speaker"}] ${l.text}`)
+    .map((l) => `[${l.agent ? me : l.speaker || "speaker"}] ${l.text}`)
     .join("\n");
 }
 
@@ -1210,7 +1213,7 @@ async function startAudioCapture(page: Page, s: Session): Promise<void> {
   let lastTap = -1;
   let warnedSilent = false;
 
-  await page.exposeFunction("__plus1Audio", (b64: string, taps: number) => {
+  await page.exposeFunction("__plus1Audio", (b64: string, taps: number, speaker?: string) => {
     if (taps !== lastTap) {
       lastTap = taps;
       s.remoteStreams = taps;
@@ -1219,6 +1222,10 @@ async function startAudioCapture(page: Page, s: Session): Promise<void> {
         `Tapped ${taps} audio stream${taps === 1 ? "" : "s"} in the room${taps <= 1 ? " — treating as a 1:1, will respond directly." : "."}`,
       );
     }
+    // Who the Meet DOM says is speaking right now. Kept as the "current speaker"
+    // so the next transcript line the stream produces can be attributed to them.
+    const who = speaker?.trim();
+    if (who) s.currentSpeaker = who;
     const ws = s.live;
     if (ws && ws.readyState === 1 && s.liveReady) {
       ws.send(
@@ -1239,11 +1246,63 @@ async function startAudioCapture(page: Page, s: Session): Promise<void> {
     ({ targetRate, frameMs }) => {
       const w = window as unknown as {
         __plus1Cap?: boolean;
-        __plus1Audio: (b: string, taps: number) => void;
+        __plus1Audio: (b: string, taps: number, speaker?: string) => void;
         __plus1Diag: (m: string) => void;
       };
       if (w.__plus1Cap) return;
       w.__plus1Cap = true;
+
+      // Best-effort active speaker, read from the Google Meet DOM. All remote
+      // audio is mixed into one stream, so the name can't come from the audio —
+      // it comes from Meet's own participant tiles. Reliable in a 1:1 (one other
+      // person → that's the speaker); a good guess in a group (the tile Meet
+      // flags as speaking); empty when unsure, so a line is never mislabelled.
+      const isName = (t: string) => {
+        const s = t.trim();
+        if (!s || s.length > 40) return false;
+        return !/^(you|presenting|is presenting|pinned|more options|muted|unmute|mute)$/i.test(s);
+      };
+      const nameOfTile = (tile: Element): string => {
+        const nn = tile.querySelector("span.notranslate") as HTMLElement | null;
+        if (nn && isName(nn.textContent || "")) return nn.textContent!.trim();
+        const self = tile.querySelector("[data-self-name]") as HTMLElement | null;
+        if (self) {
+          const v = self.getAttribute("data-self-name") || self.textContent || "";
+          if (isName(v)) return v.trim();
+        }
+        const aria = tile.getAttribute("aria-label") || "";
+        if (isName(aria)) return aria.trim();
+        return "";
+      };
+      const readSpeaker = (): string => {
+        try {
+          const tiles = Array.from(document.querySelectorAll("[data-participant-id]"));
+          const byId = new Map<string, Element>();
+          for (const t of tiles) {
+            const id = t.getAttribute("data-participant-id");
+            if (id && !byId.has(id)) byId.set(id, t);
+          }
+          const parts: { name: string; speaking: boolean; self: boolean }[] = [];
+          for (const tile of byId.values()) {
+            const self = !!tile.querySelector("[data-self-name]");
+            const name = nameOfTile(tile);
+            if (!name) continue;
+            // Meet toggles a speaking ring / animated bars; class names are
+            // obfuscated, so match loosely and fall back to aria.
+            const speaking =
+              !!tile.querySelector('[class*="peaking" i],[aria-label*="speaking" i]') ||
+              tile.getAttribute("data-is-speaking") === "true";
+            parts.push({ name, speaking, self });
+          }
+          const others = parts.filter((p) => !p.self);
+          if (others.length === 0) return "";
+          if (others.length === 1) return others[0].name; // 1:1 — unambiguous
+          const sp = others.find((p) => p.speaking);
+          return sp ? sp.name : "";
+        } catch {
+          return "";
+        }
+      };
 
       const ctx = new AudioContext();
       // Programmatically-created contexts often start suspended; without this
@@ -1335,7 +1394,7 @@ async function startAudioCapture(page: Page, s: Session): Promise<void> {
         const bytes = new Uint8Array(out.buffer);
         let bin = "";
         for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-        w.__plus1Audio(btoa(bin), taps);
+        w.__plus1Audio(btoa(bin), taps, readSpeaker());
       }, frameMs);
     },
     { targetRate: TARGET_RATE, frameMs: FRAME_MS },

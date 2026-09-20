@@ -139,10 +139,22 @@ export async function runIntactTool(
   const d = args.details ?? {};
 
   if (name === "intact_quote_car") {
+    // Don't hand out a quote built on a made-up driver: age + location move the
+    // price most, so require them before quoting rather than defaulting silently.
+    const hasAge = numOf(d.driverAge) != null;
+    const hasLocation = Boolean(strOf(d.province) || strOf(d.city) || strOf(d.postal));
+    if (!hasAge || !hasLocation) {
+      const need = [!hasAge && "how old you are", !hasLocation && "what city (or province) you're in"].filter(Boolean).join(" and ");
+      return { text: `before i can quote that, i just need ${need} — those two change the price the most.` };
+    }
     const q = quoteCar(coerceCar(d));
     return { text: fmtQuote(q), quote: q };
   }
   if (name === "intact_quote_tenant") {
+    const hasLocation = Boolean(strOf(d.province) || strOf(d.city) || strOf(d.postal));
+    if (!hasLocation) {
+      return { text: "sure — what city (or province) are you renting in? that sets the base rate." };
+    }
     const q = quoteTenant(coerceTenant(d));
     return { text: fmtQuote(q), quote: q };
   }

@@ -27,6 +27,7 @@ import {
   applyStateUpdate,
   decideAction,
   emptyState,
+  guardrailClauses,
   postToMeetChat,
   recordCompletedAction,
   type Decision,
@@ -46,6 +47,9 @@ import {
 
 /** Ignore transcription fragments this soon after the plus1 stopped: they're often its own tail. */
 const BARGE_IN_GUARD_MS = 400;
+/** Don't cut the plus1 off for a blip or background noise — only when someone is genuinely
+ *  talking over it. Interrupt once the current human utterance reaches this many words. */
+const BARGE_IN_MIN_WORDS = 3;
 
 // Auto-act tuning.
 const CONFIDENCE_THRESHOLD = Number(process.env.BRAIN_CONFIDENCE ?? 0.7);
@@ -156,9 +160,15 @@ interface Session {
 /** Per-session plus1 configuration, sent from the dashboard on join. */
 export interface SessionConfig {
   name?: string;
+  persona?: string; // freeform personality / instructions / context, injected into the prompt
   autonomy?: number; // 0 = notetaker, 100 = action taker
   confidence?: number; // 0..100 — below this it asks instead of guessing
-  guardrails?: { sendApproval?: boolean; noComp?: boolean; noDeadlines?: boolean };
+  guardrails?: {
+    sendApproval?: boolean;
+    groundClaims?: boolean;
+    noComp?: boolean;
+    noDeadlines?: boolean;
+  };
   servers?: Record<string, boolean>;
   localAccess?: "read" | "write"; // when servers.local is on
 }
@@ -166,6 +176,16 @@ export interface SessionConfig {
 /** Configured display name, falling back to the code default. */
 function nameOf(s: Session): string {
   return s.config?.name?.trim() || plus1_NAME;
+}
+
+/** Freeform persona / instructions the operator set, or empty. */
+function personaOf(s: Session): string {
+  return s.config?.persona?.trim() ?? "";
+}
+
+/** The operator's guardrail toggles, resolved to hard rules for the prompt. */
+function guardrailsOf(s: Session): string[] {
+  return guardrailClauses(s.config?.guardrails);
 }
 
 /** Confidence threshold: the tab's 0..100 slider, or the env/default. */
@@ -658,10 +678,16 @@ async function handleLiveMessage(s: Session, data: unknown): Promise<void> {
 function appendFragment(s: Session, frag: string): void {
   if (s.gapTimer) clearTimeout(s.gapTimer);
 
-  // Barge-in: a human is talking while the plus1 speaks → cut the plus1 off (mechanical, no decision).
+  // Barge-in: cut the plus1 off only when a human is *genuinely* talking over it — not for a
+  // one-word blip or background noise. We wait until the current human utterance reaches a few
+  // words, then interrupt immediately (mechanical, no decision).
   if (s.rig?.isSpeaking && Date.now() - s.lastSpeechEndedAt > BARGE_IN_GUARD_MS && frag.trim()) {
-    s.rig.interrupt();
-    note(s, `Barge-in: someone spoke over the plus1 ("${frag.trim().slice(0, 40)}").`);
+    const current = (s.currentLineId ? s.lines.find((l) => l.id === s.currentLineId)?.text : "") ?? "";
+    const words = `${current} ${frag}`.trim().split(/\s+/).filter(Boolean).length;
+    if (words >= BARGE_IN_MIN_WORDS) {
+      s.rig.interrupt();
+      note(s, `Barge-in: someone spoke over the plus1 ("${`${current} ${frag}`.trim().slice(0, 40)}").`);
+    }
   }
 
   let line = s.currentLineId
@@ -835,6 +861,8 @@ async function runBrain(s: Session): Promise<void> {
       oneOnOne: isOneOnOne(s),
       name: nameOf(s),
       autonomy: autonomyOf(s),
+      persona: personaOf(s),
+      guardrails: guardrailsOf(s),
       access: toolAccessOf(s),
       memory: s.memory,
       muted: s.muted,
@@ -941,6 +969,8 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
         transcript: () => transcriptWindow(s),
         name: nameOf(s),
         autonomy: autonomyOf(s),
+        persona: personaOf(s),
+        guardrails: guardrailsOf(s),
         channel: "meeting",
         memory: s.memory,
         muted: s.muted,

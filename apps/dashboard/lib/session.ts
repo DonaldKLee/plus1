@@ -106,6 +106,7 @@ export function readplus1Config(): Record<string, unknown> | undefined {
     // Only the fields the backend actually reads.
     return {
       name: c.name,
+      persona: c.persona,
       autonomy: c.autonomy,
       confidence: c.confidence,
       guardrails: c.guardrails,

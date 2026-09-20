@@ -136,6 +136,32 @@ export interface ToolAccess {
   sendApproval?: boolean;
 }
 
+/**
+ * Operator guardrails, as hard rules injected into the system prompt. The
+ * dashboard stores booleans by id; this is the single place the actual rule
+ * text lives, so a guardrail is a real instruction to the model and not a
+ * decorative checkbox. `sendApproval` ALSO drives the email two-step in
+ * emailTools.ts — the clause here is the spoken half of that same rule.
+ */
+export const GUARDRAIL_CLAUSES: Record<string, string> = {
+  sendApproval:
+    "Before any irreversible action — sending an email, posting to the meeting or a channel, deleting anything — say exactly what you're about to do and wait for an explicit spoken \"yes\". Never send, publish, or delete on your own initiative.",
+  groundClaims:
+    "Never state a figure, price, rate, limit, or underwriting decision unless a tool result or something said in the meeting backs it. If you don't have it, say so and offer to pull it — never estimate, round, or invent a value.",
+  noComp:
+    "Do not discuss, estimate, or speculate about anyone's compensation, salary, or headcount. If it comes up, decline briefly and steer back to the task.",
+  noDeadlines:
+    "Do not commit the operator or their team to a date, deadline, or turnaround time. Offer to note it and let a human confirm.",
+};
+
+/** Resolve the operator's guardrail toggles into the ordered rule text. */
+export function guardrailClauses(g?: Record<string, boolean> | null): string[] {
+  if (!g) return [];
+  return Object.keys(GUARDRAIL_CLAUSES)
+    .filter((id) => g[id])
+    .map((id) => GUARDRAIL_CLAUSES[id]);
+}
+
 interface ToolSpec {
   name: string;
   doc: string;
@@ -152,11 +178,11 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
     // These tools quote PERSONAL car + tenant insurance — use them, don't say you only do commercial.
     tools.push({
       name: "intact_quote_car",
-      doc: `intact_quote_car — quote PERSONAL car / auto insurance (Intact, the Canadian insurer). Call it immediately when someone asks for a car/auto quote — never say you "only do commercial". Put what you know in tool.details: driverAge, yearsLicensed, province, city, postal, vehicleYear/Make/Model/Value, annualKm, usage, coverage[basic|standard|full], deductible, bundleHome. For accidents ask AT-FAULT vs NOT-at-fault and roughly when: atFaultAccidents, notAtFaultAccidents, lastAtFaultYearsAgo, minorConvictions, majorConvictions (DUI/careless), accidentForgiveness. Missing fields default and come back as stated assumptions — quote as soon as you have a couple of basics; DON'T interrogate, DON'T stall. If the result's appetite is "high_risk" or "refer", DON'T read out a price — explain it needs a broker and offer intact_next_step.`,
+      doc: `intact_quote_car — quote PERSONAL car / auto insurance (Intact, the Canadian insurer). Never say you "only do commercial". BEFORE the first car quote you MUST have the two fields that move the price most: the driver's AGE and their PROVINCE (or city/postal). If you're missing either, ASK for it in one short, friendly line first — do NOT quote with a made-up age or city (e.g. never silently assume "35 in Toronto"). A good opener: "happy to — how old are you, and what city are you in?". Once you have age + location, call the tool and let the rest default (returned as stated assumptions). tool.details: driverAge, yearsLicensed, province, city, postal, vehicleYear/Make/Model/Value, annualKm, usage, coverage[basic|standard|full], deductible, bundleHome. For accidents ask AT-FAULT vs NOT-at-fault and roughly when: atFaultAccidents, notAtFaultAccidents, lastAtFaultYearsAgo, minorConvictions, majorConvictions (DUI/careless), accidentForgiveness. After the first quote, re-quote freely as they add details. If appetite is "high_risk"/"refer", DON'T read out a price — explain it needs a broker and offer intact_next_step. Ask at most 1-2 things at a time; never a long form; never stall.`,
     });
     tools.push({
       name: "intact_quote_tenant",
-      doc: `intact_quote_tenant — quote TENANT / renter insurance (Intact). tool.details: province, city, postal, dwellingType[apartment|condo|house|basement], contentsValue, liabilityLimit, deductible, priorClaims, hasRoommates, bundleAuto. Quote early with defaults, refine after.`,
+      doc: `intact_quote_tenant — quote TENANT / renter insurance (Intact). BEFORE the first quote, get the two big fields: their PROVINCE (or city) and roughly how much CONTENTS to cover; ask in one short line if missing rather than assuming. Then quote and let the rest default (as stated assumptions). tool.details: province, city, postal, dwellingType[apartment|condo|house|basement], contentsValue, liabilityLimit, deductible, priorClaims, hasRoommates, bundleAuto. Refine after; don't interrogate.`,
     });
     tools.push({
       name: "intact_vehicle_lookup",
@@ -249,9 +275,18 @@ function buildSystemPrompt(opts: {
   memory?: string[];
   muted?: boolean;
   state?: MeetingState;
+  persona?: string;
+  guardrails?: string[];
 }): string {
   const name = opts.name;
   const hasTools = opts.tools.length > 0;
+  const guardrailSection =
+    opts.guardrails && opts.guardrails.length > 0
+      ? `\nSAFETY GUARDRAILS — set by your operator. These are hard rules. They override the persona and every style note below; whenever anything conflicts with one, the guardrail wins:\n${opts.guardrails.map((c) => `  - ${c}`).join("\n")}\n`
+      : "";
+  const personaSection = opts.persona?.trim()
+    ? `\nYOUR PERSONA & INSTRUCTIONS — set by your operator. This defines who you are, your personality, tone, and any house rules or context. Follow it closely and let it colour everything you say and do; it takes precedence over the generic style notes below, EXCEPT the safety guardrails (those always hold):\n"""\n${opts.persona.trim()}\n"""\n`
+    : "";
   const toolsSection = hasTools
     ? `- "tool": call a tool to look something up or actually do something. Set tool.name plus its arguments (query, path, content, and/or command). ALWAYS also set "say" to a short, natural line telling the room what you're about to do BEFORE it happens (e.g. "let me look into that toyota bz for you, one sec" / "ok, making that pdf now") — a tool call must NEVER be silent. The room hears "say", then the tool runs, then you come back with the real answer.
 Available tools:
@@ -299,7 +334,7 @@ SCREEN SHARE: you have a live Browserbase work browser you can Present into this
   return `You are "${name}", a proactive meeting advisor and action-taker sitting in a live meeting as a real participant.
 
 You are NOT a passive chatbot waiting for commands. You are the expert advisor in the room: you guide the conversation, figure out what people actually need, and take concrete action to solve it. You are given the most recent lines of the meeting transcript. Decide what to do RIGHT NOW.
-
+${guardrailSection}${personaSection}
 HOW YOU TALK (this is a live audio call — pacing matters):
 - Brief and conversational. One or two sentences, lowercase, contractions. Never monologue; a long answer is worse than a short one plus a question.
 - Acknowledge before you answer, the way a person does: "got it", "understood", "makes sense".
@@ -475,6 +510,8 @@ export async function decideAction(
     memory?: string[];
     muted?: boolean;
     state?: MeetingState;
+    persona?: string;
+    guardrails?: string[];
   },
 ): Promise<Decision> {
   const name = opts?.name?.trim() || plus1_NAME;
@@ -489,6 +526,8 @@ export async function decideAction(
       memory: opts?.memory,
       muted: opts?.muted,
       state: opts?.state,
+      persona: opts?.persona,
+      guardrails: opts?.guardrails,
     }) + channelNote;
 
   const parsed = (await generateJson(
@@ -567,6 +606,8 @@ export async function narrateToolResult(opts: {
   memory?: string[];
   muted?: boolean;
   state?: MeetingState;
+  persona?: string;
+  guardrails?: string[];
   announced?: string;
   /** How many follow-up tools already ran for this question (caps the chain). */
   chainDepth?: number;
@@ -579,6 +620,8 @@ export async function narrateToolResult(opts: {
     memory: opts.memory,
     muted: opts.muted,
     state: opts.state,
+    persona: opts.persona,
+    guardrails: opts.guardrails,
   });
   const systemText = `${base}
 

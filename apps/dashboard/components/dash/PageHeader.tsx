@@ -12,7 +12,7 @@ export function PageHeader({
   right?: ReactNode;
 }) {
   return (
-    <header className="page-enter shrink-0 border-b border-border bg-bg px-5 py-6 sm:px-7 lg:px-9">
+    <header className="warm-soft grain page-enter relative shrink-0 overflow-hidden border-b border-border px-5 py-6 sm:px-7 lg:px-9">
       <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-[26px] font-semibold tracking-[-0.04em] text-fg">{title}</h1>

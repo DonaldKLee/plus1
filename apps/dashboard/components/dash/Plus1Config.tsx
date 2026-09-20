@@ -1,137 +1,26 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Panel, PanelHead, Input, Plus1Mark, Chip, Dot, Button, cx } from "@/components/ui";
-import { Shield, Plug, PageMark, Check, Plus } from "@/components/icons";
+import { Panel, PanelHead, Input, Plus1Mark, Chip, Dot, cx } from "@/components/ui";
+import { Plug, Check, Plus } from "@/components/icons";
 import {
   activeSessionId,
   fetchplus1Config,
   saveplus1Config,
   updateSessionConfig,
 } from "@/lib/session";
-
-/* --------------------------------------------------------------- model ---- */
-
-type ServerId = "federato" | "intact" | "local" | "docs" | "email";
-type AccessLevel = "read" | "write";
-
-interface Config {
-  name: string;
-  voice: string;
-  autonomy: number; // 0 = notetaker, 100 = action taker
-  confidence: number; // 0..100 — below this it asks instead of guessing
-  honk: boolean;
-  monologueMin: number; // honk after N minutes of monologue
-  guardrails: { sendApproval: boolean; noComp: boolean; noDeadlines: boolean };
-  servers: Record<ServerId, boolean>;
-  localAccess: AccessLevel;
-}
-
-const DEFAULT_CONFIG: Config = {
-  name: "Shannon",
-  voice: "reginald",
-  autonomy: 45,
-  confidence: 68,
-  honk: true,
-  monologueMin: 3,
-  guardrails: { sendApproval: true, noComp: true, noDeadlines: false },
-  // Documents are harmless (a PDF in memory); email leaves the building, so it
-  // starts off and stays behind the sendApproval guardrail.
-  servers: { federato: true, intact: false, local: false, docs: true, email: false },
-  localAccess: "read",
-};
-
-const STORAGE_KEY = "plus1.plus1.config";
-
-/** Fill in anything a stored config is missing, whatever its source. */
-function normalize(p: Partial<Config>): Config {
-  return {
-    ...DEFAULT_CONFIG,
-    ...p,
-    guardrails: { ...DEFAULT_CONFIG.guardrails, ...(p.guardrails ?? {}) },
-    servers: { ...DEFAULT_CONFIG.servers, ...(p.servers ?? {}) },
-    localAccess: p.localAccess === "write" ? "write" : "read",
-  };
-}
-
-/** This browser's cached copy — the instant paint, before MongoDB answers. */
-function loadConfig(): Config {
-  if (typeof window === "undefined") return DEFAULT_CONFIG;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_CONFIG;
-    return normalize(JSON.parse(raw) as Partial<Config>);
-  } catch {
-    return DEFAULT_CONFIG;
-  }
-}
-
-const VOICES = [
-  { id: "reginald", name: "Reginald", desc: "dry, slightly-too-formal" },
-  { id: "bramble", name: "Bramble", desc: "warm, eager intern" },
-  { id: "pennington", name: "Pennington", desc: "clipped, senior partner" },
-  { id: "undersec", name: "Undersecretary", desc: "gravelly, unbothered" },
-];
-
-const SERVERS: { id: ServerId; name: string; monogram: string; summary: string }[] = [
-  {
-    id: "federato",
-    name: "Federato",
-    monogram: "F",
-    summary: "Underwriting appetite and submissions — schema discovery, query planning, per-policy scoring.",
-  },
-  { id: "intact", name: "Intact", monogram: "I", summary: "Conversational car + tenant insurance quoting — Bob gathers what's needed and returns an estimate with coverage recommendations." },
-  {
-    id: "local",
-    name: "Local access",
-    monogram: "L",
-    summary: "Read and write files on this machine, scoped to the working directory.",
-  },
-  {
-    id: "docs",
-    name: "Documents",
-    monogram: "D",
-    summary: "Write meeting notes, recaps and action items into a real PDF you can download or have emailed.",
-  },
-  {
-    id: "email",
-    name: "Email",
-    monogram: "E",
-    summary:
-      "Send email over SMTP, with a generated PDF attached. Needs GMAIL_USER + GMAIL_APP_PASSWORD (or the SMTP_* vars) in .env — without them the plus1 drafts but nothing goes out.",
-  },
-];
-
-const GUARDRAILS: { id: keyof Config["guardrails"]; label: string }[] = [
-  { id: "sendApproval", label: "Ask before sending, publishing, or deleting" },
-  { id: "noComp", label: "Never discuss compensation or salary" },
-  { id: "noDeadlines", label: "Never commit to deadlines on my behalf" },
-];
-
-/* ---------------------------------------------------------- honk synth ---- */
-
-function playHonk() {
-  try {
-    const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new AC();
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "sawtooth";
-    osc.frequency.setValueAtTime(210, now);
-    osc.frequency.exponentialRampToValueAtTime(340, now + 0.08);
-    osc.frequency.exponentialRampToValueAtTime(180, now + 0.34);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.35, now + 0.03);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.42);
-    osc.onended = () => ctx.close();
-  } catch {
-    /* audio unavailable */
-  }
-}
+import {
+  type AccessLevel,
+  type Config,
+  DEFAULT_CONFIG,
+  GUARDRAILS,
+  loadConfig,
+  normalize,
+  SERVERS,
+  STORAGE_KEY,
+  ToolTile,
+  broadcastConfig,
+} from "@/lib/plus1";
 
 /* ------------------------------------------------------------ controls ---- */
 
@@ -195,26 +84,6 @@ function Slider({
         <span className="text-[11.5px] text-fg-subtle">{right}</span>
       </div>
     </div>
-  );
-}
-
-function Checkbox({ on, onChange, label }: { on: boolean; onChange: (n: boolean) => void; label: string }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!on)}
-      className="flex w-full items-center gap-3 rounded-[var(--r-sm)] px-1 py-1.5 text-left transition-colors hover:bg-bg-raise/60"
-    >
-      <span
-        className={cx(
-          "flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border transition-colors",
-          on ? "border-transparent bg-inverse-bg text-inverse-fg" : "border-border-strong bg-bg text-transparent",
-        )}
-      >
-        <Check width={12} height={12} />
-      </span>
-      <span className={cx("text-[13.5px]", on ? "text-fg" : "text-fg-muted")}>{label}</span>
-    </button>
   );
 }
 
@@ -338,6 +207,9 @@ export function Plus1Config() {
     } catch {
       /* storage unavailable — the tab still works for this session */
     }
+    // Tell the rail (and any other mounted surface) immediately, so an enabled
+    // tool appears there the moment it's toggled — no reload, no round-trip.
+    broadcastConfig(config);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       void saveplus1Config(config as unknown as Record<string, unknown>).then((ok) => {
@@ -355,6 +227,7 @@ export function Plus1Config() {
       liveTimer.current = setTimeout(() => {
         void updateSessionConfig(sid, {
           name: config.name,
+          persona: config.persona,
           autonomy: config.autonomy,
           confidence: config.confidence,
           guardrails: config.guardrails,
@@ -374,6 +247,7 @@ export function Plus1Config() {
 
   const displayName = config.name.trim() || "the plus1";
   const enabledCount = Object.values(config.servers).filter(Boolean).length;
+  const guardCount = Object.values(config.guardrails).filter(Boolean).length;
   const sentence = useMemo(() => behaviorSentence(config), [config]);
 
   const set = <K extends keyof Config>(key: K, val: Config[K]) =>
@@ -389,8 +263,10 @@ export function Plus1Config() {
       )}
 
       {/* live behaviour summary — reads the whole config back in plain English */}
-      <div className="flex items-start gap-3 rounded-[var(--r)] border border-border bg-bg-subtle p-4">
-        <Plus1Mark size={26} className="mt-0.5 shrink-0 text-fg" />
+      <div className="warm-card grain relative flex items-start gap-3.5 overflow-hidden rounded-[var(--r)] border border-border p-4">
+        <span className="plus1-halo mt-0.5 shrink-0">
+          <Plus1Mark size={28} className="text-fg" />
+        </span>
         <div className="min-w-0">
           <p className="text-[15px] leading-relaxed text-fg">{sentence}</p>
         </div>
@@ -423,39 +299,28 @@ export function Plus1Config() {
           </div>
         </div>
 
-        {/* voice */}
+        {/* persona / instructions */}
         <div className="border-t border-border px-5 py-5">
-          <span className="mb-2.5 block text-[13px] font-medium text-fg">Voice</span>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {VOICES.map((v) => {
-              const active = config.voice === v.id;
-              return (
-                <div
-                  key={v.id}
-                  className={cx(
-                    "flex items-center gap-3 rounded-[var(--r-sm)] border px-3 py-2.5 transition-colors",
-                    active ? "border-border-strong bg-bg-raise" : "border-border bg-bg hover:border-border-strong",
-                  )}
-                >
-                  <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" onClick={() => set("voice", v.id)}>
-                    <span
-                      className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border"
-                      style={{ borderColor: active ? "var(--fg)" : "var(--border-strong)" }}
-                    >
-                      {active && <span className="h-1.5 w-1.5 rounded-full bg-fg" />}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-[13.5px] font-medium text-fg">{v.name}</span>
-                      <span className="block truncate text-[12px] text-fg-subtle">{v.desc}</span>
-                    </span>
-                  </button>
-                  <Button size="sm" variant="ghost" onClick={playHonk} aria-label={`Preview ${v.name} — honk`}>
-                    honk
-                  </Button>
-                </div>
-              );
-            })}
-          </div>
+          <label className="block">
+            <span className="mb-1.5 block text-[13px] font-medium text-fg">Persona &amp; instructions</span>
+            <textarea
+              value={config.persona}
+              rows={5}
+              spellCheck
+              placeholder="Describe how it should act — personality, tone, any context or rules. e.g. “You're a calm, no-nonsense broker. Be concise. We only write personal auto and tenant in Ontario. Always mention bundling.”"
+              onChange={(e) => set("persona", e.target.value)}
+              className={cx(
+                "w-full resize-y rounded-[var(--r-sm)] border border-border bg-bg px-3 py-2.5 text-[14px] leading-relaxed text-fg",
+                "transition-colors duration-150 hover:border-border-strong",
+                "focus:border-border-strong focus:outline-none",
+                "focus-visible:outline-2 focus-visible:outline-offset-[-1px] focus-visible:outline-[var(--ring)]",
+              )}
+            />
+            <p className="mt-2 text-[12.5px] leading-relaxed text-fg-muted">
+              This is fed straight into the model — it shapes how {displayName} talks and acts in
+              meetings and chat. Personality, tone, house rules, or context all work.
+            </p>
+          </label>
         </div>
       </Panel>
 
@@ -524,17 +389,57 @@ export function Plus1Config() {
 
       {/* ---- guardrails ---- */}
       <Panel>
-        <PanelHead title="Guardrails" />
-        <div className="flex flex-col gap-0.5 p-4">
-          {GUARDRAILS.map((g) => (
-            <Checkbox
-              key={g.id}
-              on={config.guardrails[g.id]}
-              label={g.label}
-              onChange={(n) => set("guardrails", { ...config.guardrails, [g.id]: n })}
-            />
-          ))}
+        <PanelHead
+          title="Guardrails"
+          right={
+            <span className="tnum text-[12px] text-fg-subtle">
+              {guardCount} of {GUARDRAILS.length} enforced
+            </span>
+          }
+        />
+        <div className="divide-y divide-border">
+          {GUARDRAILS.map((g) => {
+            const on = config.guardrails[g.id];
+            return (
+              <button
+                key={g.id}
+                type="button"
+                onClick={() => set("guardrails", { ...config.guardrails, [g.id]: !on })}
+                aria-pressed={on}
+                className="group flex w-full items-start gap-3.5 px-5 py-3.5 text-left transition-colors hover:bg-bg-subtle/60"
+              >
+                <span
+                  className={cx(
+                    "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--r-sm)] border transition-colors",
+                    on ? "border-border-strong bg-bg text-fg" : "border-border bg-bg-subtle text-fg-subtle",
+                  )}
+                >
+                  <g.Icon width={16} height={16} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className={cx("block text-[13.5px] font-medium", on ? "text-fg" : "text-fg-muted")}>
+                    {g.label}
+                  </span>
+                  <span className="mt-0.5 block max-w-[58ch] text-[12.5px] leading-relaxed text-fg-subtle">
+                    {g.hint}
+                  </span>
+                </span>
+                <span
+                  className={cx(
+                    "mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border transition-colors",
+                    on ? "border-transparent bg-inverse-bg text-inverse-fg" : "border-border-strong bg-bg text-transparent",
+                  )}
+                >
+                  <Check width={12} height={12} />
+                </span>
+              </button>
+            );
+          })}
         </div>
+        <p className="border-t border-border px-5 py-3 text-[12px] leading-relaxed text-fg-subtle">
+          Guardrails are hard rules written into the plus1&rsquo;s prompt — they hold above its
+          persona and apply in every meeting and chat.
+        </p>
       </Panel>
 
       {/* ---- tools / MCP servers ---- */}
@@ -554,14 +459,7 @@ export function Plus1Config() {
             return (
               <div key={s.id} className="px-5 py-4">
                 <div className="flex items-start gap-3.5">
-                  <span
-                    className={cx(
-                      "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--r-sm)] border text-[13px] font-semibold transition-colors",
-                      on ? "border-border-strong bg-bg text-fg" : "border-border bg-bg-subtle text-fg-subtle",
-                    )}
-                  >
-                    {s.monogram}
-                  </span>
+                  <ToolTile tile={s.tile} on={on} className="mt-0.5" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="text-[14px] font-medium text-fg">{s.name}</span>

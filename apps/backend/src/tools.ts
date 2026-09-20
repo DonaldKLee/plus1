@@ -127,6 +127,8 @@ export interface ChainContext {
   transcript: () => string;
   name: string;
   autonomy: number;
+  persona?: string;
+  guardrails?: string[];
   channel?: "meeting" | "chat";
   memory: string[];
   muted?: boolean;
@@ -174,6 +176,8 @@ export async function runToolChain(first: ToolCall, access: ToolAccess, ctx: Cha
         transcript: ctx.transcript(),
         name: ctx.name,
         autonomy: ctx.autonomy,
+        persona: ctx.persona,
+        guardrails: ctx.guardrails,
         access,
         channel: ctx.channel,
         memory: ctx.memory,

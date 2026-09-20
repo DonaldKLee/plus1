@@ -10,6 +10,7 @@ import {
   applyStateUpdate,
   decideAction,
   emptyState,
+  guardrailClauses,
   plus1_NAME,
   recordCompletedAction,
   type MeetingState,
@@ -62,6 +63,12 @@ function nameOf(c?: SessionConfig): string {
 }
 function autonomyOf(c?: SessionConfig): number {
   return typeof c?.autonomy === "number" ? c.autonomy : 50;
+}
+function personaOf(c?: SessionConfig): string {
+  return c?.persona?.trim() ?? "";
+}
+function guardrailsOf(c?: SessionConfig): string[] {
+  return guardrailClauses(c?.guardrails);
 }
 function toolAccessOf(c?: SessionConfig): ToolAccess {
   const servers = c?.servers;
@@ -145,6 +152,8 @@ export async function sendChatMessage(
     channel: "chat",
     name: nameOf(c.config),
     autonomy: autonomyOf(c.config),
+    persona: personaOf(c.config),
+    guardrails: guardrailsOf(c.config),
     access,
     memory: c.memory,
     state: c.state,
@@ -182,6 +191,8 @@ export async function sendChatMessage(
         transcript: () => transcriptOf(c),
         name: nameOf(c.config),
         autonomy: autonomyOf(c.config),
+        persona: personaOf(c.config),
+        guardrails: guardrailsOf(c.config),
         channel: "chat",
         memory: c.memory,
         muted: false,

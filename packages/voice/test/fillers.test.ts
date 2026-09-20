@@ -12,7 +12,14 @@ class CountingTts implements TextToSpeech {
 
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
-const only = (ack: string[], checking: string[] = []) => ({ ack, checking, wait: [], unsure: [] });
+const only = (ack: string[], checking: string[] = []) => ({
+  ack,
+  checking,
+  wait: [],
+  unsure: [],
+  thinking: [],
+  loading: [],
+});
 
 describe("FillerCache", () => {
   it("synthesises once, persists WAVs, and reloads from disk with a voice-scoped key", async () => {

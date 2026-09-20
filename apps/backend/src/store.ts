@@ -71,6 +71,8 @@ const COLLECTION = "meetings";
 const SETTINGS = "settings";
 /** Single settings document: there is one plus1 per deployment. */
 const plus1_SETTINGS_ID = "plus1";
+/** Work-cam delivery mode: local Present vs cloud camera. */
+const WORKCAM_SETTINGS_ID = "workcam";
 
 let client: MongoClient | null = null;
 let dbPromise: Promise<Db> | null = null;
@@ -391,6 +393,30 @@ export async function saveplus1Settings(config: Record<string, unknown>): Promis
   const r = await safe("saveplus1Settings", () =>
     database.collection<plus1SettingsDoc>(SETTINGS).updateOne(
       { _id: plus1_SETTINGS_ID },
+      { $set: { config, updatedAt: new Date().toISOString() } },
+      { upsert: true },
+    ),
+  );
+  return Boolean(r);
+}
+
+/** Saved work-cam config (`{ mode: "local" | "cloud" }`), or null. */
+export async function getWorkCamSettings(): Promise<Record<string, unknown> | null> {
+  const database = await db().catch(() => null);
+  if (!database) return null;
+  const doc = await safe("getWorkCamSettings", () =>
+    database.collection<plus1SettingsDoc>(SETTINGS).findOne({ _id: WORKCAM_SETTINGS_ID }),
+  );
+  return doc?.config ?? null;
+}
+
+/** Persist work-cam config. Returns false when there is no database. */
+export async function saveWorkCamSettings(config: Record<string, unknown>): Promise<boolean> {
+  const database = await db().catch(() => null);
+  if (!database) return false;
+  const r = await safe("saveWorkCamSettings", () =>
+      database.collection<plus1SettingsDoc>(SETTINGS).updateOne(
+      { _id: WORKCAM_SETTINGS_ID },
       { $set: { config, updatedAt: new Date().toISOString() } },
       { upsert: true },
     ),

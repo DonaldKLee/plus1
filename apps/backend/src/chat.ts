@@ -76,6 +76,7 @@ function toolAccessOf(c?: SessionConfig): ToolAccess {
     files,
     email: servers?.email === true,
     docs: servers?.docs === true,
+    browser: true,
     // Default to requiring approval: an unset guardrail must not mean "just send it".
     sendApproval: c?.guardrails?.sendApproval !== false,
   };

@@ -16,8 +16,9 @@ const MEET_RE =
  */
 export function JoinMeeting() {
   const router = useRouter();
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState("https://meet.google.com/vhz-nzug-ich");
   const [purpose, setPurpose] = useState("");
+  const [task, setTask] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hovered, setHovered] = useState(false);
@@ -40,7 +41,7 @@ export function JoinMeeting() {
     setError(null);
     setBusy(true);
     try {
-      const sessionId = await joinMeeting(trimmed, purpose.trim());
+      const sessionId = await joinMeeting(trimmed, purpose.trim(), task.trim());
       router.push(`/app/meetings/${sessionId}`);
     } catch (err) {
       setError(
@@ -57,8 +58,8 @@ export function JoinMeeting() {
           Send the goose into a call
         </h2>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-fg-muted">
-          It joins as a visible guest, transcribes the room, and answers when
-          someone says its name.
+          It joins on camera, presents the work browser, transcribes the room,
+          and answers when someone says its name.
         </p>
 
         <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-start">
@@ -142,6 +143,30 @@ export function JoinMeeting() {
               {!busy && <Arrow width={16} height={16} />}
             </Button>
           </div>
+        </div>
+
+        <div className="mt-3">
+          <label
+            htmlFor="work-task"
+            className="mb-1.5 block text-[13px] font-medium text-fg"
+          >
+            Work prompt{" "}
+            <span className="font-normal text-fg-subtle">· jev</span>
+          </label>
+          <Input
+            id="work-task"
+            value={task}
+            disabled={busy}
+            onChange={(e) => setTask(e.target.value)}
+            placeholder="Play Wordle and leave the result on screen"
+            maxLength={240}
+            autoComplete="off"
+            className="h-11 text-[14.5px] disabled:opacity-50"
+          />
+          <p className="mt-1.5 text-[12px] text-fg-subtle">
+            Starts a new Browserbase agent run and screenshares that tab. Blank
+            = Maps.
+          </p>
         </div>
 
         {error ? (

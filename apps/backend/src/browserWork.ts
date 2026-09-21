@@ -34,6 +34,10 @@ export function unregisterMeetingMedia(id: string): void {
   mediaByMeeting.delete(id);
 }
 
+export function getMeetingMedia(id: string): MeetingMedia | undefined {
+  return mediaByMeeting.get(id);
+}
+
 function bindNotes(note?: (msg: string) => void): string[] {
   const notes: string[] = [];
   notes.push = ((...items: string[]) => {

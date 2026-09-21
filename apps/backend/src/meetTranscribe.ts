@@ -1336,19 +1336,12 @@ async function executeDecision(s: Session, d: Decision): Promise<string> {
 
     const said = await sayInRoom(s, reply);
 
-    // A share link is the deliverable, and nobody can act on a URL read aloud —
-    // so it goes into the meeting chat verbatim, where everyone can click it.
-    // This is the whole point of the public document server.
-    if (shareUrl && page) {
-      // The URL itself is the artifact — dump the whole tool result and
-      // people have to hunt for a clickable link.
-      await postToMeetChat(page, shareUrl);
-    } else {
-      // A spoken summary can't carry a breakdown (a quote's coverage lines, a file
-      // listing). Drop the detail in the chat too, so nobody has to ask for it —
-      // but only when it's genuinely more than what was just said out loud.
+    // PDF share links are posted only via meet_chat_send (that tool posts itself).
+    // Do not auto-post here — that caused "already in chat" lies when the post never happened.
+    if (!shareUrl || last?.call.name === "meet_chat_send") {
+      // Detailed non-PDF tool results can still go to chat when longer than the spoken line.
       const detailed = result.includes("\n") || result.length > 220;
-      if (detailed && page && result.trim() !== reply.trim()) {
+      if (!shareUrl && detailed && page && result.trim() !== reply.trim()) {
         await postToMeetChat(page, `${nameOf(s)} — ${result}`);
       }
     }

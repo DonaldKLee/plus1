@@ -194,7 +194,7 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
     });
     tools.push({
       name: "intact_quote_pdf",
-      doc: `intact_quote_pdf — render a one-page Intact PERSONAL quote PDF (car or tenant). The masthead says Intact, never Federato. Use when the room has been quoting personal auto/tenant and they want "a quote pdf", "put that on paper", or "send me the quote". tool.details: the same quote fields plus product[car|tenant], name, email. The public Appwrite link is posted into Meet chat automatically — NEVER read the URL aloud. Do NOT use this for a commercial-property / Federato account.`,
+      doc: `intact_quote_pdf — render a one-page Intact PERSONAL quote PDF immediately. Set tool.details.product from conversation context: "car" or "tenant" (home/house/renter → tenant). No default product. Fill known quote fields from context; omit the rest — the engine uses dummy defaults. Do NOT ask the room for more info before calling. This does NOT post to Meet chat — after it returns, call meet_chat_send (attachPdf:"last") to put the link in chat. Masthead says Intact, never Federato. NEVER read the URL aloud. Not for Federato/commercial.`,
     });
     tools.push({
       name: "intact_email_quote",
@@ -239,6 +239,11 @@ function toolCatalog(access: ToolAccess): ToolSpec[] {
       doc: `browser_unshare() — stop presenting / stop sharing your screen in this Meet. Call when someone says "stop sharing", "stop presenting", "you can stop", "unshare", or "take your screen down". Does not close the work browser — only leaves Present.`,
     });
   }
+  // Always on in meetings — posting to Meet chat is delivery, not a "server".
+  tools.push({
+    name: "meet_chat_send",
+    doc: `meet_chat_send — post the last PDF share link (or details.message) into Google Meet chat RIGHT NOW. Generating a PDF does NOT put it in chat — you MUST call this. Use when they ask for a quote/report in chat, "send it in the chat", "put it in the chat", "I don't see the link", or after *_quote_pdf when delivery should be chat. details.attachPdf:"last" (default). Never claim you already posted unless THIS tool just returned posted success. If it fails, say so and call it again — do not argue.`,
+  });
   return tools;
 }
 
@@ -289,7 +294,8 @@ ${opts.memory.map((m) => `  - ${m}`).join("\n")}\n`
     ? `
 PERSONAL LINES (Intact, the Canadian insurer): car and tenant quotes live here, not in Federato.
 - "quote my car" / "how much for a 2020 corolla" → intact_quote_car in the same turn.
-- "send me the quote pdf" / "put that quote on paper" after an Intact quote → intact_quote_pdf with the same details, say="putting the intact quote together now".
+- "send me the quote pdf" / "put that quote on paper" after an Intact quote → intact_quote_pdf immediately with product from context (car vs tenant/home) and any known details; then meet_chat_send to put the link in Meet chat. Do not ask for more fields first.
+- "send it in the chat" / "I don't see the pdf" → meet_chat_send (attachPdf last). NEVER say you already sent it without calling meet_chat_send this turn.
 - Never stamp a personal-lines PDF as Federato, and never use federato_quote_pdf for a car or tenant quote.
 `
     : "";
@@ -310,7 +316,7 @@ WORKED EXAMPLES (what someone says → what you do, in the same turn):
 - "how exposed are we already to flood / to that broker / in california?" → federato_portfolio, tool.query="hazard" / "broker" / "state".
 - "how many active property policies do we have in california over fifty million?" / "which brokers send us the most declines?" / "claims over a hundred k by cause?" → federato_query with the question as tool.query, say="let me run that against the book".
 - "what's the premium rule again?" / "what does TIV mean?" → federato_guidelines, tool.query="premium" / "TIV".
-- "send a quote pdf" / "write up the indication" / "can you put harbor point on paper?" → if this is a commercial Federato account, federato_quote_pdf with tool.query=the account, say="putting the indication together now". If this is a personal Intact car/tenant quote, intact_quote_pdf with the quote details instead — never mix the two brands.
+- "send a quote pdf" / "write up the indication" / "can you put harbor point on paper?" → if this is a commercial Federato account, federato_quote_pdf with tool.query=the account, then meet_chat_send to post the link. If this is a personal Intact car/tenant quote, intact_quote_pdf then meet_chat_send — never mix the two brands.
 - "draft the quote letter for cedar valley" / "write up the decline for harbor point" / "put together the dec page for 1001" → federato_draft, tool.query = the request as said, say="drafting that now — it'll be marked for your review".
 - "prep the contract for willowbrook" / "put together the package for SUB-2025-00134" / "get the indication ready for the merrin hale submission" → federato_draft with tool.query="contract for willowbrook" (an open submission → the full ingest → enrich → classify → draft package), say="pulling the submission and the file, i'll have the draft package in a moment".
 - After a tool: lead with the decision or the number, then the ONE factor that drives it, then the next step ("cross continental's a decline: premium's a hundred eighty-eight over the one seventy-five cap and the buildings are seventy-eight. want the next one?").
@@ -375,7 +381,7 @@ Your stance: ${autonomyStance(opts.autonomy)}
 
 Actions:
 - "speak": say something out loud in the room. Put the words in "say".
-- "chat": post a message to the meeting text chat (use this when asked to "put it in the chat", or to share a draft / link / longer text). Put the text in "chatMessage".
+- "chat": post a free-text message to the meeting chat (drafts, notes). For PDF / quote / indication links use tool meet_chat_send instead — do not claim a PDF is in chat via this action.
 ${toolsSection}
 - "none": stay quiet this turn.
 
@@ -455,7 +461,11 @@ function buildResponseSchema(tools: ToolSpec[]) {
 
     if (tools.some((t) => t.name.startsWith("intact_"))) {
       Object.assign(detailProps, {
-        product: { type: "string", enum: ["car", "tenant"] },
+        product: {
+          type: "string",
+          enum: ["car", "tenant", "home", "house", "renter", "auto"],
+          description: "car|auto = auto quote PDF; tenant|home|house|renter = home/tenant quote PDF",
+        },
         name: str, email: str,
         driverAge: num, yearsLicensed: num,
         atFaultAccidents: num, notAtFaultAccidents: num, lastAtFaultYearsAgo: num,

@@ -177,7 +177,7 @@ export function realtimeToolsFor(access: ToolAccess): RealtimeToolDef[] {
       {
         name: "intact_quote_pdf",
         description:
-          "Render an Intact PERSONAL quote PDF. Link posts to Meet chat automatically. Only call email_send after if they asked to email it (attachPdf:'last'). When this returns, the PDF is DONE — never say still generating.",
+          "Render an Intact PERSONAL quote PDF immediately. Set details.product from context: 'car' or 'tenant' (tenant for home/house/renter) — required, no default. Pass any known quote fields; missing ones use dummy defaults. Does NOT post to Meet chat — after it returns call meet_chat_send. Do not ask clarifying questions first. email_send only if they asked to email. When this returns the PDF file is DONE.",
       },
       {
         name: "intact_email_quote",
@@ -201,7 +201,7 @@ export function realtimeToolsFor(access: ToolAccess): RealtimeToolDef[] {
       type: "function",
       name: "email_send",
       description:
-        "Email someone. details: to (optional — uses plus1 default recipient), subject, body, attachPdf: 'last' for the PDF just generated. Sends on the first call unless the tool reply says pendingApproval (then call again with confirm:true). Use ONLY when they asked to email / mail it — reports go to Meet chat by default without this tool.",
+        "Email someone. details: to (optional — uses plus1 default recipient), subject, body, attachPdf: 'last' for the PDF just generated. Sends on the first call unless the tool reply says pendingApproval (then call again with confirm:true). Use ONLY when they asked to email / mail it — for Meet chat use meet_chat_send instead.",
       parameters: q,
     });
     tools.push({
@@ -227,6 +227,13 @@ export function realtimeToolsFor(access: ToolAccess): RealtimeToolDef[] {
       parameters: { type: "object", properties: {}, additionalProperties: true },
     });
   }
+  tools.push({
+    type: "function",
+    name: "meet_chat_send",
+    description:
+      "Post the last PDF share link (or details.message) into Google Meet chat NOW. PDF generation does NOT put the link in chat — you MUST call this. Use after *_quote_pdf, or when they say 'send it in the chat', 'put it in the chat', 'I don't see the link'. details.attachPdf:'last' by default. Never claim you already posted unless this tool just returned success. If it fails, say so and retry — do not argue.",
+    parameters: q,
+  });
   if (access.files === "read" || access.files === "write") {
     tools.push({ type: "function", name: "list_files", description: "List files in the shared folder.", parameters: q });
     tools.push({ type: "function", name: "read_file", description: "Read a text file from the shared folder.", parameters: q });
@@ -720,13 +727,7 @@ This is the ONLY time you introduce yourself this call.`,
     } catch (e) {
       result = { text: `tool error: ${(e as Error).message}` };
     }
-    if (result.shareUrl) {
-      try {
-        await this.opts.handlers.onShareUrl?.(result.shareUrl);
-      } catch {
-        /* chat post is best-effort */
-      }
-    }
+    // PDF tools may return shareUrl but must NOT auto-post — meet_chat_send is the delivery tool.
     for (const line of result.trace ?? []) {
       this.opts.handlers.onNote(`  why: ${line}`);
     }
@@ -746,6 +747,7 @@ This is the ONLY time you introduce yourself this call.`,
           text: result.text,
           pdfUrl: result.pdfUrl,
           shareUrl: result.shareUrl,
+          posted: result.posted,
           pendingApproval: result.pendingApproval,
           trace: result.trace,
         }),
@@ -757,17 +759,24 @@ This is the ONLY time you introduce yourself this call.`,
     if (prior) await prior.catch(() => undefined);
 
     const pdfTool = /_quote_pdf$|_email_quote$|^federato_quote_pdf$|^doc_pdf$/.test(name);
+    const chatSend = name === "meet_chat_send";
     const emailTool = name === "email_send" || name === "email_draft";
     const browserWork = name === "browser_work";
     let followUp: string;
     if (browserWork) {
       followUp = `Continue the same conversation. You already introduced yourself — do NOT greet.
 browser_work finished. Details are already in Meet chat. Speak ONE short line only (e.g. "got it — it's on my screen"). Do NOT narrate steps or URLs.`;
+    } else if (chatSend) {
+      followUp = result.posted
+        ? `meet_chat_send succeeded — the link is in Meet chat NOW. Speak ONE short line confirming that. Do NOT regenerate the PDF.`
+        : `meet_chat_send FAILED — the link is NOT in Meet chat. Speak one short honest line and offer to try again. Do NOT claim you already sent it. Do NOT regenerate the PDF unless they ask.`;
     } else if (pdfTool) {
       followUp = `Continue the same conversation. Do NOT greet.
-The PDF tool FINISHED — it is not still generating. ${result.shareUrl ? "The link is already in Meet chat." : "The PDF is ready."}
-- If they asked to email / mail it (this turn or just before): call email_send NOW with details.attachPdf="last", a short subject/body, and the default recipient if no address was given.
-- Otherwise: speak ONE short line that it's in the chat (or ready). Do NOT call email_send. Do NOT say "generating in the background" / "working on it" / "still putting it together".`;
+The PDF file is ready — it is NOT in Meet chat yet.
+- If they want it in chat / asked for the report or quote (default): call meet_chat_send NOW with details.attachPdf="last".
+- If they asked to email / mail it: call email_send with attachPdf="last".
+- Do NOT say the link is already in the chat until meet_chat_send returns success.
+- Do NOT say "generating in the background" / "still putting it together".`;
     } else if (emailTool) {
       followUp = result.pendingApproval
         ? `Email draft is ready for approval. Speak one short line asking them to confirm. Do NOT claim you already sent it.`
@@ -775,8 +784,9 @@ The PDF tool FINISHED — it is not still generating. ${result.shareUrl ? "The l
     } else {
       followUp = `Continue the same conversation. You already introduced yourself — do NOT greet or say your name again.
 
-If the user asked to email / send this PDF and you have not emailed yet, call email_send NOW with details.attachPdf="last".
-If they already got a PDF and are nudging "send it" / "email it", call email_send — do NOT regenerate the PDF and do NOT say it's still generating.
+If they asked to put a PDF / report in the chat and you have not called meet_chat_send successfully this turn, call meet_chat_send NOW.
+If they asked to email and you have not emailed yet, call email_send NOW with details.attachPdf="last".
+If they nudge "send it in the chat" / "I don't see it", call meet_chat_send — do NOT claim you already posted it and do NOT regenerate the PDF.
 
 Otherwise speak the tool result in one or two short sentences — no greeting.`;
     }
@@ -858,9 +868,10 @@ FEDERATO — commercial property underwriting book (NOT personal auto/tenant):
       : "";
   const intact = ctx.access.intact !== false
     ? `
-INTACT — Canadian personal lines (car / auto / tenant / renter) + general insurance education:
-- Use for everyday insurance questions: "what is a deductible", "how does collision work", "quote my car", "tenant insurance", VIN lookup, personal quote PDFs, broker next steps.
+INTACT — Canadian personal lines (car / auto / tenant / renter / home contents) + general insurance education:
+- Use for everyday insurance questions: "what is a deductible", "how does collision work", "quote my car", "tenant insurance", "home quote", VIN lookup, personal quote PDFs, broker next steps.
 - Tools: intact_explain (terms), intact_quote_car, intact_quote_tenant, intact_vehicle_lookup, intact_quote_pdf, intact_next_step.
+- Home / house / renter quotes → intact_quote_tenant, then intact_quote_pdf with product=tenant (NOT car).
 - Never brand an Intact quote as Federato. Never use Federato tools for personal auto/tenant.
 `
       : "";
@@ -869,7 +880,7 @@ WHICH TOOL FAMILY (pick one — do not guess out loud without a tool when a tool
 1. Personal auto / tenant / renter / VIN / "what does X coverage mean" / general insurance FAQ → Intact (intact_*).
 2. Federato / commercial property queue / account deep-dive / book exposure / appetite rules / commercial indication PDF → Federato (federato_*).
 3. Visible web lookup / share screen / show a house on Maps / live FEMA flood map → browser_work. Stop share → browser_unshare.
-4. Commercial indication PDF → federato_quote_pdf. Personal quote PDF → intact_quote_pdf. Email → email_*.
+4. Commercial indication PDF → federato_quote_pdf then meet_chat_send. Personal quote PDF → intact_quote_pdf then meet_chat_send. Email → email_* only if they asked to email.
 Never invent a generic notes PDF — use the Federato / Intact PDF tools for reports and quotes.
 Never use browser_work to answer Federato book questions or Intact quotes when those tools exist — except a live map / Street View / FEMA screen share is always browser_work.
 Never use Federato for a personal car/tenant quote, and never use Intact for Harbor Point / the UW queue.
@@ -903,9 +914,10 @@ HOW YOU TALK:
 
 TAKING ACTION:
 - Announce briefly, then call the tool in the same turn. After it returns, finish your thought out loud — a decision, a number — not a data dump. Do not cut yourself off mid-sentence.
-- REPORTS / PDFs: default delivery is Meet chat (the link is posted automatically). Do NOT email unless they asked to email / mail it. If they asked for both (PDF + email), call the PDF tool then email_send with attachPdf:"last".
-- If they nudge "send it" / "email it" after a PDF already exists: call email_send only — do NOT regenerate the PDF and do NOT claim it's still generating.
-- Never read a share URL aloud; it is posted to Meet chat automatically.
+- REPORTS / PDFs: generate with *_quote_pdf, then call meet_chat_send (attachPdf:"last") to put the link in Meet chat. Generating a PDF alone does NOT post to chat.
+- If they say "send it in the chat" / "put it in the chat" / "I don't see the link": ALWAYS call meet_chat_send — never claim you already posted it unless meet_chat_send just returned success this turn.
+- Email only when they asked to email / mail it (email_send with attachPdf:"last"). "Send it" in a Meet usually means chat, not email.
+- Never read a share URL aloud.
 - Federato PDFs say Federato; Intact PDFs say Intact. Do not mix brands.
 ${routing}${federato}${intact}${browser}
 Prefer tools over guessing. Prefer a short helpful line over silence.`;

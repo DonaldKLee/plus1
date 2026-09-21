@@ -11,6 +11,7 @@ import { runIntactTool, type NextStep } from "./intactTools.js";
 import { runEmailTool } from "./emailTools.js";
 import { runDocTool } from "./docTools.js";
 import { runBrowserWork, runBrowserUnshare } from "./browserWork.js";
+import { runMeetChatTool } from "./meetChatTools.js";
 import type { QuoteResult } from "@plus1/brain";
 
 export type ToolCall = NonNullable<Decision["tool"]>;
@@ -27,6 +28,8 @@ export interface ToolResult {
   pendingApproval?: boolean;
   /** A publicly reachable link, when public sharing is configured. */
   shareUrl?: string;
+  /** meet_chat_send: true only when Meet chat accepted the post. */
+  posted?: boolean;
 }
 
 const t = (text: string): ToolResult => ({ text });
@@ -79,6 +82,16 @@ export async function executeTool(
         pendingApproval: r.pendingApproval,
       }))
       .catch((e: Error) => t(`email error: ${e.message}`));
+  }
+
+  if (name === "meet_chat_send") {
+    return runMeetChatTool(
+      name,
+      { query: call.query, content: call.content, details: call.details },
+      { meetingId: opts?.meetingId },
+    )
+      .then((r) => ({ text: r.text, shareUrl: r.shareUrl, posted: r.posted }))
+      .catch((e: Error) => t(`meet chat error: ${e.message}`));
   }
 
   if (name === "browser_work") {

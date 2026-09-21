@@ -79,6 +79,21 @@ function applicantOf(d: Details): QuoteApplicant {
   return { name: strOf(d.name), province: strOf(d.province), email: strOf(d.email), vehicle: vehicle || undefined };
 }
 
+/** Explicit product only — no inference, no default. home/house/renter → tenant. */
+function resolveProduct(d: Details): "car" | "tenant" | null {
+  const raw = strOf(d.product)?.toLowerCase().replace(/[\s_-]+/g, "") ?? "";
+  if (!raw) return null;
+  if (/^(car|auto|vehicle|automobile|personalauto)$/.test(raw)) return "car";
+  if (
+    /^(tenant|renter|renters|rentersinsurance|home|house|homeowner|homeowners|homeownersinsurance|homeinsurance|condo|apartment|contents|dwelling)$/.test(
+      raw,
+    )
+  ) {
+    return "tenant";
+  }
+  return null;
+}
+
 function fmtQuote(q: QuoteResult): string {
   const kind = q.product === "car" ? "Car insurance" : "Tenant insurance";
   if (q.appetite !== "standard" && q.handoffReason) {
@@ -170,15 +185,21 @@ export async function runIntactTool(
   }
 
   if (name === "intact_quote_pdf" || name === "intact_email_quote") {
-    const product = enumOf(d.product, ["car", "tenant"] as const) ?? (d.contentsValue != null ? "tenant" : "car");
+    // Product must come from the call (conversation context). No clarifying
+    // questions — missing rating fields use the quote engine's dummy defaults.
+    const product = resolveProduct(d);
+    if (!product) {
+      return { text: "intact_quote_pdf needs details.product (car|tenant|home)." };
+    }
     const q = product === "tenant" ? quoteTenant(coerceTenant(d)) : quoteCar(coerceCar(d));
     const pdf = await renderQuotePdf(q, applicantOf(d));
+    const label = product === "tenant" ? "home/tenant" : "car";
     const email = strOf(d.email);
     const text = pdf.shareUrl
-      ? `Intact ${product} quote is ready. The PDF is in the chat — don't read the URL.`
+      ? `Intact ${label} quote PDF is ready — call meet_chat_send next to post the link (it is NOT in Meet chat yet). Don't read the URL.`
       : email
-        ? `your Intact ${product} quote is ready as a PDF. I can email it to ${email}.`
-        : `your Intact ${product} quote is ready as a PDF.`;
+        ? `your Intact ${label} quote is ready as a PDF. I can email it to ${email}.`
+        : `your Intact ${label} quote is ready as a PDF.`;
     return { text, quote: q, pdfUrl: pdf.pdfUrl, shareUrl: pdf.shareUrl };
   }
 
